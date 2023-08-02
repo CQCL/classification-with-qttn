@@ -1,9 +1,7 @@
-from lzma import FILTER_DELTA
 from pathlib import Path
-from random import shuffle
 import numpy as np
 import jax.numpy as jnp
-from discopy.quantum import Id, Ket, H, Bra
+from discopy.quantum import Id, Ket, Bra
 from discopy.quantum.circuit import Box, Measure, Discard
 import tensornetwork as tn
 from jax import vmap, value_and_grad, jit, vmap
@@ -11,11 +9,12 @@ from sklearn.utils import gen_batches
 from tqdm import tqdm
 import time 
 import pickle
-from matplotlib.pyplot import axes
 import numpy as np
 import pickle
 import optax
 from functools import partial
+
+from .ansatz import ansatz9, ansatz14, IQP
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -63,13 +62,13 @@ for parse_type in ['unibox', 'height']:
     print("Number of test examples: ", len(test_data["labels"]))
     # ------------------------------- READ IN DATA ----------------------------- #
     
-    for n_word_qubits in [1]: 
+    for n_qubits in [1]: 
 
         for n_layers in [1,2]:
 
             for lr in [0.01,0.001,0.0001]:
 
-                n_rule_qubits = 2 * n_word_qubits  # number of qubits in each sub-PQC
+                
                 if not use_jit: 
                     jit = lambda x: x
                 eval_args = {}
@@ -83,7 +82,7 @@ for parse_type in ['unibox', 'height']:
                 print("Number of epochs: ", no_epochs)
                 print("Batch size: ", batch_size)
                 print("Ansatz: ", ansatz)
-                print("Number of word qubits: ", n_word_qubits)
+                print("Number of word qubits: ", n_qubits)
                 print("Number of layers: ", n_layers)
                 print("Using post selection: ", post_sel)
                 print("Include classification box: ", include_final_classification_box)
@@ -92,95 +91,11 @@ for parse_type in ['unibox', 'height']:
                 def flatten_list(li):
                     return [y for x in li for y in x]
 
-                def IQP(n_qubits, n_layers, params):
 
-                    circ = Id(n_qubits)
-                    if n_qubits == 1:
-                        assert len(params) == 3
-                        circ = circ.Rx(params[0], 0)
-                        circ = circ.Rz(params[1], 0)
-                        circ = circ.Rx(params[2], 0)
-                    else:
-                        
-                        assert len(params) == (n_qubits-1) * n_layers
-                        lay_params = (n_qubits-1) 
-                        
-                        for n in range(n_layers):
-                            hadamards = Id(0).tensor(*(n_qubits * [H]))
-                            circ = circ >> hadamards
-                            for i in range(n_qubits-1):
-                                tgt = i
-                                src = i+1
-                                circ = circ.CRz(params[i+(n*lay_params)], src, tgt)
-                    return circ
 
-                def ansatz14(n_qubits, n_layers, params):
-                    
-                    circ = Id(n_qubits)
 
-                    if n_qubits == 1:
-                        assert len(params) == 3
-                        circ = circ.Rx(params[0], 0)
-                        circ = circ.Rz(params[1], 0)
-                        circ = circ.Rx(params[2], 0)
-                    else:
-                        
-                        assert len(params) == 4 * n_qubits * n_layers
-                        lay_params = 4 * n_qubits
-                        
-                        for n in range(n_layers):
-                            # single qubit rotation wall 1
-                            for i in range(n_qubits):
-                                param = params[i + (n * lay_params)]
-                                circ = circ.Ry(param, i)
 
-                            # entangling ladder 1
-                            for i in range(n_qubits):
-                                src = (n_qubits - 1 + i) % n_qubits
-                                tgt = (n_qubits - 1 + i + 1) % n_qubits
-                                param = params[i + n_qubits + (n * lay_params)]
-                                circ = circ.CRx(param, src, tgt)
 
-                            # single qubit rotation wall 2
-                            for i in range(n_qubits):
-                                param = params[i  + 2 * n_qubits+(n * lay_params)]
-                                circ = circ.Ry(param, i)
-
-                            # entangling ladder 2
-                            for i in range(n_qubits):
-                                src = (n_qubits - 1 + i) % n_qubits
-                                tgt = (n_qubits - 1 + i - 1) % n_qubits
-                                param = params[i + 3  * n_qubits + (n * lay_params)]
-                                circ = circ.CRx(param, src, tgt)
-                    return circ
-
-                def ansatz9(n_qubits, n_layers, params):
-
-                    circ = Id(n_qubits)
-
-                    if n_qubits == 1:
-                        assert len(params) == 3
-                        circ = circ.Rx(params[0], 0)
-                        circ = circ.Rz(params[1], 0)
-                        circ = circ.Rx(params[2], 0)
-                    else:
-                        assert len(params) == n_qubits * n_layers
-                        
-                        lay_params = n_qubits
-                        
-                        for n in range(n_layers):
-                            
-                            hadamards = Id().tensor(*(n_qubits * [H]))
-                            circ = circ >> hadamards
-
-                            for i in range(n_qubits - 1):
-                                circ = circ.CZ(i, i + 1)
-
-                            for i in range(n_qubits):
-                                param = params[i+(n * lay_params)]
-                                circ = circ.Rx(param, i)
-
-                    return circ
 
                 def Ansatz(n_qubits, n_layers, params, type):
                     if type == 'IQP':
@@ -191,53 +106,46 @@ for parse_type in ['unibox', 'height']:
                         return ansatz9(n_qubits, n_layers, params)
 
                 def word_vec_initilisation(word_params): # initialise word states according to params
-                    circ = Ket(*[0] * n_word_qubits)
-                    circ >>= Ansatz(n_word_qubits, n_layers, word_params, ansatz)
+                    circ = Ket(*[0] * n_qubits)
+                    circ >>= Ansatz(n_qubits, n_layers, word_params, ansatz)
                     return circ.eval(**eval_args).array
 
                 single_batch_vec_init = jit(vmap(word_vec_initilisation)) # vmap over initial states in a tree
 
                 def make_words(data, name): # return discopy box from post discard density matrix
                     from discopy.quantum.circuit import qubit as d_qb
-                    dom, cod = d_qb ** 0, d_qb ** n_word_qubits
+                    dom, cod = d_qb ** 0, d_qb ** n_qubits
                     box = Box(name, dom, cod, is_mixed=mixed, data=data)
-                    box.array = box.data
-                    return box
-
-                def make_state(data, name):
-                    from discopy.quantum.circuit import qubit as d_qb
-                    dom, cod = d_qb ** (2 * n_word_qubits), d_qb ** (2 * n_word_qubits)
-                    box = Box(name, dom, cod, is_mixed=True, data=data)
                     box.array = box.data
                     return box
 
                 def uCTN(W_params, U_params, I_params, class_params, ns):
 
                     words = [make_words(vec, "w") for vec in single_batch_vec_init(W_params)]
-                    circ = Id().tensor(*words)
+                    circ = Id.tensor(*words)
 
                     for n in ns:
 
                         # apply unitary ops
-                        for i in range(n_word_qubits, n-n_word_qubits)[::2*n_word_qubits]:
-                            circ >>= Id(i)@Ansatz(n_rule_qubits, n_layers, U_params, ansatz)@Id(n-i-2*n_word_qubits)
+                        for i in range(n_qubits, n-n_qubits)[::2*n_qubits]:
+                            circ >>= Id(i)@Ansatz(2 * n_qubits, n_layers, U_params, ansatz)@Id(n-i-2*n_qubits)
 
                         # apply isometry
-                        for i in range(n-n_word_qubits)[::2*n_word_qubits]:
-                            circ >>= Id(i)@Ansatz(n_rule_qubits, n_layers, I_params, ansatz)@Id(n-i-2*n_word_qubits)
+                        for i in range(n-n_qubits)[::2*n_qubits]:
+                            circ >>= Id(i)@Ansatz(2 * n_qubits, n_layers, I_params, ansatz)@Id(n-i-2*n_qubits)
 
                         if post_sel:
-                            circ >>= Id().tensor(*[Id(1) @ Bra(0)] * int(n/2))
+                            circ >>= Id.tensor(*[Id(1) @ Bra(0)] * int(n/2))
                         else: 
-                            circ >>= Id().tensor(*[Id(1) @ Discard()] * int(n/2))
+                            circ >>= Id.tensor(*[Id(1) @ Discard()] * int(n/2))
 
                     # apply final classification ansatz
                     if include_final_classification_box:
-                        circ >>= Ansatz(n_word_qubits, n_layers, class_params, ansatz)
+                        circ >>= Ansatz(n_qubits, n_layers, class_params, ansatz)
 
                     # measure the middle qubit
-                    left = n_word_qubits // 2
-                    right = n_word_qubits - left - 1
+                    left = n_qubits // 2
+                    right = n_qubits - left - 1
 
                     # circ >>= Discard(left) @ Measure() @ Discard(right)
                     if not post_sel:
@@ -247,7 +155,7 @@ for parse_type in ['unibox', 'height']:
 
                     if post_sel:
                         pred = jnp.square(jnp.abs(pred+1e-7))
-                        axes = list(range(n_word_qubits))
+                        axes = list(range(n_qubits))
                         axes.pop(left)
                         pred = jnp.sum(pred, axis=tuple(axes))
 
@@ -259,29 +167,29 @@ for parse_type in ['unibox', 'height']:
                 def hCTN(W_params, U_params, I_params, class_params, ns):
 
                     words = [make_words(vec, "w") for vec in single_batch_vec_init(W_params)]
-                    circ = Id().tensor(*words)
+                    circ = Id.tensor(*words)
 
                     for idx, n in enumerate(ns):  
 
                         # apply unitary ops
-                        for i in range(n_word_qubits, n-n_word_qubits)[::2*n_word_qubits]:
-                            circ >>= Id(i)@Ansatz(n_rule_qubits, n_layers, U_params[idx], ansatz)@Id(n-i-2*n_word_qubits)
+                        for i in range(n_qubits, n-n_qubits)[::2*n_qubits]:
+                            circ >>= Id(i)@Ansatz(2 * n_qubits, n_layers, U_params[idx], ansatz)@Id(n-i-2*n_qubits)
 
                         # apply isometry
-                        for i in range(n-n_word_qubits)[::2*n_word_qubits]:
-                            circ >>= Id(i)@Ansatz(n_rule_qubits, n_layers, I_params[idx], ansatz)@Id(n-i-2*n_word_qubits)
+                        for i in range(n-n_qubits)[::2*n_qubits]:
+                            circ >>= Id(i)@Ansatz(2 * n_qubits, n_layers, I_params[idx], ansatz)@Id(n-i-2*n_qubits)
                         if post_sel:
-                            circ >>= Id().tensor(*[Id(1) @ Bra(0)] * int(n/2))
+                            circ >>= Id.tensor(*[Id(1) @ Bra(0)] * int(n/2))
                         else: 
-                            circ >>= Id().tensor(*[Id(1) @ Discard()] * int(n/2))
+                            circ >>= Id.tensor(*[Id(1) @ Discard()] * int(n/2))
 
                     # apply final classification ansatz
                     if include_final_classification_box:
-                        circ >>= Ansatz(n_word_qubits, n_layers, class_params, ansatz)
+                        circ >>= Ansatz(n_qubits, n_layers, class_params, ansatz)
 
                     # measure the middle qubit
-                    left = n_word_qubits // 2
-                    right = n_word_qubits - left - 1
+                    left = n_qubits // 2
+                    right = n_qubits - left - 1
 
                     # circ >>= Discard(left) @ Measure() @ Discard(right)
                     if not post_sel:
@@ -291,7 +199,7 @@ for parse_type in ['unibox', 'height']:
 
                     if post_sel:
                         pred = jnp.square(jnp.abs(pred+1e-7))
-                        axes = list(range(n_word_qubits))
+                        axes = list(range(n_qubits))
                         axes.pop(left)
                         pred = jnp.sum(pred, axis=tuple(axes))
 
@@ -385,23 +293,23 @@ for parse_type in ['unibox', 'height']:
                 print("Number of unique tokens: ", no_words+1)
 
                 if ansatz == 'A14':
-                    if n_word_qubits == 1:
+                    if n_qubits == 1:
                         word_emb_size = 3
                     else:
-                        word_emb_size = n_word_qubits * 4 * n_layers
-                    rule_embed_size = n_rule_qubits * 4 * n_layers
+                        word_emb_size = n_qubits * 4 * n_layers
+                    rule_embed_size = 2 * n_qubits * 4 * n_layers
                 elif ansatz == 'A9':
-                    if n_word_qubits == 1:
+                    if n_qubits == 1:
                         word_emb_size = 3
                     else:
-                        word_emb_size = n_word_qubits * n_layers
-                    rule_embed_size = n_rule_qubits * n_layers
+                        word_emb_size = n_qubits * n_layers
+                    rule_embed_size = 2 * n_qubits * n_layers
                 elif ansatz == 'IQP':
-                    if n_word_qubits == 1:
+                    if n_qubits == 1:
                         word_emb_size = 3
                     else:
-                        word_emb_size = (n_word_qubits-1) * n_layers
-                    rule_embed_size = (n_rule_qubits-1) * n_layers
+                        word_emb_size = (n_qubits-1) * n_layers
+                    rule_embed_size = (2 * n_qubits-1) * n_layers
 
                 if use_optax_reg is True:
                     optim = 'adamW'
@@ -423,7 +331,7 @@ for parse_type in ['unibox', 'height']:
 
                 params = {'words': word_params,'Us': U_params, 'Is': I_params, 'class': class_params}
 
-                N = window_size*n_word_qubits
+                N = window_size*n_qubits
                 ns = tuple([int(N/(jnp.power(2, i))) for i in range(int(jnp.log2(window_size)))])
  
                 val_accuracies = []
@@ -506,9 +414,9 @@ for parse_type in ['unibox', 'height']:
                 
                     # ------------------------------ SAVE DATA -----------------–------------ #    
                     if post_sel:
-                        save_path = f'Results/{data_name}/{model}_SLIDE_{window_size}/{parse_type}/post_sel/{n_word_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
+                        save_path = f'Results/{data_name}/{model}_SLIDE_{window_size}/{parse_type}/post_sel/{n_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
                     else:
-                        save_path = f'Results/{data_name}/{model}_SLIDE_{window_size}/{parse_type}/discards/{n_word_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
+                        save_path = f'Results/{data_name}/{model}_SLIDE_{window_size}/{parse_type}/discards/{n_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
 
                     Path(save_path).mkdir(parents=True, exist_ok=True)
                     pickle.dump(obj=all_params, file=open(f'{save_path}{"param_dict"}', 'wb'))

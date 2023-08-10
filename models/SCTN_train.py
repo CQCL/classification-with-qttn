@@ -14,8 +14,8 @@ import pickle
 import optax
 import yaml
 
-from .ansatz import apply_box, make_density_matrix, make_state_vector
-from .ansatz import IQPAnsatz, Ansatz9, Ansatz14
+from ansatz import apply_box, make_density_matrix, make_state_vector
+from ansatz import IQPAnsatz, Ansatz9, Ansatz14
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -39,7 +39,7 @@ else:
     box_vec = make_density_matrix
 
 # ------------------------------- READ IN DATA ---------------------------- #
-load_path = f'Data/{conf["data_name"]}/{conf["parse_type"]}/'
+load_path = f'../Data/{conf["data_name"]}/{conf["parse_type"]}/'
 
 w2i = pickle.load(file=open(f'{load_path}w2i', 'rb'))
 r2i = pickle.load(file=open(f'{load_path}r2i', 'rb'))
@@ -90,8 +90,6 @@ def SCTN(W_params, U_params, I_params, Us, Is, class_params):
             U_box = ansatz(2 * n_qubits, 2 * n_qubits, U_params[idx])
             circ = apply_box(circ, U_box, u * n_qubits)
 
-        # WHY AREN'T WE LOOPING OVER I_inds?
-
         # apply discard op
         I_box = ansatz(2 * n_qubits, n_qubits, I_params[idx])
         circ = apply_box(circ, I_box, I_inds * n_qubits)
@@ -107,7 +105,7 @@ def SCTN(W_params, U_params, I_params, Us, Is, class_params):
     wire_state = box_vec(circ.eval(**eval_args).array, 1)
     wire_state >>= Measure()
 
-    pred = wire_state.eval(**eval_args).array
+    pred = wire_state.eval().array
     pred = jnp.array(pred, jnp.float64)
 
     return pred
@@ -130,6 +128,7 @@ def get_loss(params, batch_words, batch_rules, batch_Us, batch_Is, labels):
 val_n_grad = value_and_grad(get_loss)
 
 def train_step(params, opt_state, batch_words, batch_rules, batch_Us, batch_Is, batch_labels):
+    
     cost, grads = val_n_grad(params, batch_words, batch_rules, batch_Us, batch_Is, batch_labels)
 
     if conf['use_grad_clip']: 
@@ -198,8 +197,8 @@ def evaluate(data, n):
     for d in tqdm(data):
         if len(d["labels"]) == 0:
             continue
-        Us = d["U_offsets"][0]  # why 0 index here?
-        Is = d["I_offsets"][0]
+        Us = d["I_offsets"][0]  # same for all in structural batch
+        Is = d["U_offsets"][0]
         batches = get_batches(d["words"], d["rules"], d["labels"], conf['batch_size'])
         for batch_words, batch_rules, batch_labels in batches:
             batch_acc = get_accs(params, batch_words, batch_rules, Us, Is, batch_labels)
@@ -217,8 +216,8 @@ for epoch in range(conf['n_epochs']):
     for data in tqdm(train_data):
         if len(data["labels"]) == 0:
             continue
-        Us = data["U_offsets"][0]
-        Is = data["I_offsets"][0]
+        Us = data["I_offsets"][0] # same for all in structural batch 
+        Is = data["U_offsets"][0]
         batches = get_batches(data["words"], data["rules"], data["labels"], conf['batch_size'])
         for batch_words, batch_rules, batch_labels in batches:
             cost, params, opt_state = train_step(params, opt_state, batch_words, batch_rules, Us, Is, batch_labels)

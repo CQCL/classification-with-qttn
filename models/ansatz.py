@@ -20,6 +20,9 @@ def make_state_vector(data, n_qubits):
     return box
 
 def apply_box(circ, box, idx):
+    # print(circ)
+    # print(box)
+    # print(idx)
     circ >>= Id(idx) @ box @ Id(len(circ.cod) - len(box.dom) - idx)
     return circ
 

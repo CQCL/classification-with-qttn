@@ -99,7 +99,7 @@ def SCTN(W_params, U_params, I_params, Us, Is, class_params):
 
     # measure the middle qubit
     eff = Bra(0) if conf['post_sel'] else Discard()
-    boxes = [Id(1) if i == n_qubits // 2 + 1 else eff for i in range(n_qubits)]
+    boxes = [Id(1) if i == n_qubits // 2 else eff for i in range(n_qubits)]
     circ >>= Id.tensor(*boxes)
     
     wire_state = box_vec(circ.eval(**eval_args).array, 1)
@@ -248,7 +248,7 @@ for epoch in range(conf['n_epochs']):
     }
 
     # ------------------------------ SAVE DATA -----------------–------------ #
-    save_path = f'Results'
+    save_path = f'../Results'
     Path(save_path).mkdir(parents=True, exist_ok=True)
     for key, value in conf.items():
         full_save_path = f'{save_path}{key}'

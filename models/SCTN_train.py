@@ -39,7 +39,7 @@ else:
     box_vec = make_density_matrix
 
 # ------------------------------- READ IN DATA ---------------------------- #
-load_path = f'../Data/{conf["data_name"]}/{conf["parse_type"]}/'
+load_path = f'../Data/SCTN/{conf["data_name"]}/{conf["parse_type"]}/'
 
 w2i = pickle.load(file=open(f'{load_path}w2i', 'rb'))
 r2i = pickle.load(file=open(f'{load_path}r2i', 'rb'))
@@ -197,8 +197,8 @@ def evaluate(data, n):
     for d in tqdm(data):
         if len(d["labels"]) == 0:
             continue
-        Us = d["I_offsets"][0]  # same for all in structural batch
-        Is = d["U_offsets"][0]
+        Us = d["U_offsets"][0] # same for all in structural batch 
+        Is = d["I_offsets"][0]
         batches = get_batches(d["words"], d["rules"], d["labels"], conf['batch_size'])
         for batch_words, batch_rules, batch_labels in batches:
             batch_acc = get_accs(params, batch_words, batch_rules, Us, Is, batch_labels)
@@ -216,8 +216,8 @@ for epoch in range(conf['n_epochs']):
     for data in tqdm(train_data):
         if len(data["labels"]) == 0:
             continue
-        Us = data["I_offsets"][0] # same for all in structural batch 
-        Is = data["U_offsets"][0]
+        Us = data["U_offsets"][0] # same for all in structural batch 
+        Is = data["I_offsets"][0]
         batches = get_batches(data["words"], data["rules"], data["labels"], conf['batch_size'])
         for batch_words, batch_rules, batch_labels in batches:
             cost, params, opt_state = train_step(params, opt_state, batch_words, batch_rules, Us, Is, batch_labels)

@@ -26,10 +26,8 @@ tn.set_default_backend("jax")
 
 np.random.seed(0)
 
-# ------------------------------------- SETTINGS -------------------------------- #
 with open('SCTN_config.yaml', 'r') as f:
     conf = yaml.safe_load(f)
-# ------------------------------------- SETTINGS -------------------------------- #
 
 n_qubits = conf['n_qubits'] # number of qubits per word
 
@@ -112,7 +110,7 @@ def SCTN(W_params, U_params, I_params, Us, Is, class_params):
 
 vmap_mera = vmap(SCTN, (0, 0, 0, None, None, None))
 
-def get_loss(params, batch_words, batch_rules, batch_Us, batch_Is, labels):
+def get_preds(params, batch_words, batch_rules, batch_Us, batch_Is):
     preds = vmap_mera(params['words'][batch_words], params['Us'][batch_rules], params['Is'][batch_rules],  batch_Us, batch_Is, params['class'])
 
     if conf['post_sel']:
@@ -120,7 +118,11 @@ def get_loss(params, batch_words, batch_rules, batch_Us, batch_Is, labels):
 
     if not conf['use_jit']:
         assert all(jnp.allclose(jnp.sum(pred), jnp.ones(1), atol=1e-3)  for pred in preds)
-    
+
+    return preds
+
+def get_loss(params, batch_words, batch_rules, batch_Us, batch_Is, labels):
+    preds = get_preds(params, batch_words, batch_rules, batch_Us, batch_Is)
     out = jnp.array([jnp.dot(label, jnp.log(pred+1e-7)) for pred, label in zip(preds, jnp.array(labels))])
 
     return -jnp.sum(out)
@@ -128,7 +130,6 @@ def get_loss(params, batch_words, batch_rules, batch_Us, batch_Is, labels):
 val_n_grad = value_and_grad(get_loss)
 
 def train_step(params, opt_state, batch_words, batch_rules, batch_Us, batch_Is, batch_labels):
-    
     cost, grads = val_n_grad(params, batch_words, batch_rules, batch_Us, batch_Is, batch_labels)
 
     if conf['use_grad_clip']: 
@@ -144,14 +145,7 @@ def train_step(params, opt_state, batch_words, batch_rules, batch_Us, batch_Is, 
     return cost, params, opt_state
 
 def get_accs(params, batch_words, batch_rules, batch_Us, batch_Is, labels):
-    preds = vmap_mera(params['words'][batch_words], params['Us'][batch_rules], params['Is'][batch_rules],  batch_Us, batch_Is, params['class'])
-
-    if conf['post_sel']:
-        preds = preds / jnp.sum(preds, axis=1)[:,None]
-
-    if not conf['use_jit']:
-        assert all(jnp.allclose(jnp.sum(pred), jnp.ones(1), atol=1e-3)  for pred in preds)
-
+    preds = get_preds(params, batch_words, batch_rules, batch_Us, batch_Is)
     acc = np.sum([np.round(pred) == np.array(label, float) for pred, label in zip(preds, labels)]) / 2
 
     return acc
@@ -250,6 +244,6 @@ for epoch in range(conf['n_epochs']):
     # ------------------------------ SAVE DATA -----------------–------------ #
     save_path = f'../Results'
     Path(save_path).mkdir(parents=True, exist_ok=True)
-    for key, value in conf.items():
+    for key, value in save_dict.items():
         full_save_path = f'{save_path}{key}'
         pickle.dump(obj=value, file=open(f'{full_save_path}/{key}', 'wb'))

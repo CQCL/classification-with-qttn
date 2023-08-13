@@ -293,9 +293,6 @@ for parse_type in ['unibox', 'height']:
 
                     return zip(batched_w, batched_r, batched_o, batched_l)
 
-                def flatten_list(li):
-                    return [y for x in li for y in x]
-
                 def pad_trees(batch_words, batch_rules, batch_offsets, max_words, words_pad_idx, rules_pad_idx):
                     pad_words = []
                     pad_rules = []

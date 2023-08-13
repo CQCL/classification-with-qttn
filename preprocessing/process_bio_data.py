@@ -1,5 +1,4 @@
 import numpy as np
-import pandas as pd
 import pickle
 from pathlib import Path
 import math    
@@ -148,7 +147,7 @@ pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
 pickle.dump(obj=train_dict_CTN, file=open(f'{save_path}{"train_data"}', 'wb'))
 pickle.dump(obj=val_dict_CTN, file=open(f'{save_path}{"val_data"}', 'wb'))
 pickle.dump(obj=test_dict_CTN, file=open(f'{save_path}{"test_data"}', 'wb'))
-# # -------------------------------------- PTN process----------------------------------- #
+# -------------------------------------- PTN process----------------------------------- #
 
 # get r2i
 max_words = thr
@@ -161,13 +160,30 @@ train_sents = [list(s) for s in train_sents]
 val_sents = [list(s) for s in val_sents]
 test_sents = [list(s) for s in test_sents]
 
-uPTN_train_dict = {"words": [[w2i[s] for s in sent] for sent in train_sents], "rules":[np.zeros(len(s), dtype=int) for s in train_sents] , "offsets": [[(0,i+1) for i in range(len(s))] for s in train_sents], "labels": train_labels[-1]}
-uPTN_val_dict = {"words": [[w2i[s] for s in sent] for sent in val_sents], "rules":[np.zeros(len(s), dtype=int) for s in val_sents] , "offsets": [[(0,i+1) for i in range(len(s))] for s in val_sents], "labels": val_labels[-1]}
-uPTN_test_dict = {"words": [[w2i[s] for s in sent] for sent in test_sents], "rules":[np.zeros(len(s), dtype=int) for s in test_sents] , "offsets": [[(0,i+1) for i in range(len(s))] for s in test_sents], "labels": test_labels[-1]}
+uPTN_train_dict = {
+    "words": [[w2i[s] for s in sent] for sent in train_sents],
+    "rules":[np.zeros(len(s), dtype=int) for s in train_sents],
+    "offsets": [[(0,i+1) for i in range(len(s))] for s in train_sents],
+    "labels": train_labels[-1]
+}
+
+uPTN_val_dict = {
+    "words": [[w2i[s] for s in sent] for sent in val_sents],
+    "rules":[np.zeros(len(s), dtype=int) for s in val_sents],
+    "offsets": [[(0,i+1) for i in range(len(s))] for s in val_sents],
+    "labels": val_labels[-1]
+}
+
+uPTN_test_dict = {
+    "words": [[w2i[s] for s in sent] for sent in test_sents],
+    "rules":[np.zeros(len(s), dtype=int) for s in test_sents],
+    "offsets": [[(0,i+1) for i in range(len(s))] for s in test_sents],
+    "labels": test_labels[-1]
+}
  
 print("hPTN Train examples: ", len(uPTN_train_dict["words"]))
 print("hPTN Validation examples: ", len(uPTN_val_dict["words"]))
-print("hPTN Test examples: ",len(uPTN_test_dict["words"]))
+print("hPTN Test examples: ", len(uPTN_test_dict["words"]))
 
 if thr < 64:
     save_path = f'Data/PTN/{data_name}_cut_{thr}/unibox'    
@@ -180,9 +196,26 @@ pickle.dump(obj=uPTN_train_dict, file=open(f'{save_path}{"train_data"}', 'wb'))
 pickle.dump(obj=uPTN_val_dict, file=open(f'{save_path}{"val_data"}', 'wb'))
 pickle.dump(obj=uPTN_test_dict, file=open(f'{save_path}{"test_data"}', 'wb'))
 
-hPTN_train_dict = {"words": [[w2i[s] for s in sent] for sent in train_sents], "rules":[list(range(len(s))) for s in train_sents] , "offsets": [[(0,i+1) for i in range(len(s))] for s in train_sents], "labels": train_labels[-1]}
-hPTN_val_dict = {"words": [[w2i[s] for s in sent] for sent in val_sents], "rules":[list(range(len(s))) for s in val_sents] , "offsets": [[(0,i+1) for i in range(len(s))] for s in val_sents], "labels": val_labels[-1]}
-hPTN_test_dict = {"words": [[w2i[s] for s in sent] for sent in test_sents], "rules":[list(range(len(s))) for s in test_sents] , "offsets": [[(0,i+1) for i in range(len(s))] for s in test_sents], "labels": test_labels[-1]}
+hPTN_train_dict = {
+    "words": [[w2i[s] for s in sent] for sent in train_sents],
+    "rules":[list(range(len(s))) for s in train_sents],
+    "offsets": [[(0,i+1) for i in range(len(s))] for s in train_sents],
+    "labels": train_labels[-1]
+}
+
+hPTN_val_dict = {
+    "words": [[w2i[s] for s in sent] for sent in val_sents],
+    "rules":[list(range(len(s))) for s in val_sents],
+    "offsets": [[(0,i+1) for i in range(len(s))] for s in val_sents],
+    "labels": val_labels[-1]
+}
+
+hPTN_test_dict = {
+    "words": [[w2i[s] for s in sent] for sent in test_sents],
+    "rules":[list(range(len(s))) for s in test_sents],
+    "offsets": [[(0,i+1) for i in range(len(s))] for s in test_sents],
+    "labels": test_labels[-1]
+}
  
 print("hPTN Train examples: ", len(hPTN_train_dict["words"]))
 print("hPTN Validation examples: ", len(hPTN_val_dict["words"]))

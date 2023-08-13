@@ -6,7 +6,6 @@ from lambeq import TreeReader
 from lambeq import TreeReaderMode
 import spacy
 from discopy.rigid import Box, Id
-from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 data = 'RT'

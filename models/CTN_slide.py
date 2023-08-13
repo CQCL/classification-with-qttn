@@ -12,6 +12,7 @@ import pickle
 import numpy as np
 import pickle
 import optax
+from datatime import datetime
 
 import yaml
 
@@ -73,9 +74,9 @@ train_data = pickle.load(file=open(f'{save_path}{"train_data"}', 'rb'))
 val_data = pickle.load(file=open(f'{save_path}{"val_data"}', 'rb'))
 test_data = pickle.load(file=open(f'{save_path}{"test_data"}', 'rb'))
 
-print("Number of train examples: ", len(train_data["labels"]))
-print("Number of val examples: ", len(val_data["labels"]))
-print("Number of test examples: ", len(test_data["labels"]))
+print("Number of train examples: ", len(train_data['labels']))
+print("Number of val examples: ", len(val_data['labels']))
+print("Number of test examples: ", len(test_data['labels']))
 # ------------------------------- READ IN DATA ----------------------------- #
 
                 
@@ -288,89 +289,67 @@ all_params = []
 
 
 sum_accs = []
-for batch_words, batch_counts, batch_labels in tqdm(get_batches(val_data['words'], val_data['counts'], val_data['labels'], batch_size)): 
-    batch_counts = np.concatenate(([0], batch_counts))
-    cum_inds = tuple(np.array([np.cumsum(batch_counts[:i+1])[-1] for i in range(len(batch_counts))], np.int64)) 
-    try:
-        batch_words = jnp.array(flatten_list(batch_words), jnp.int64)
-        acc = get_accs(params, batch_words, ns, cum_inds, batch_labels)
-    except:
-        batch_words = jnp.array(batch_words, jnp.int64)
-        acc = get_accs(params, batch_words, ns, cum_inds, batch_labels)
-    sum_accs.append(acc)
 
-val_acc = np.sum(sum_accs) / len(val_data['labels'])
+def evaluate(data, n):
+    acc = 0
+    batches = get_batches(data['words'], data['counts'], data['labels'], batch_size)
+    for batch_words, batch_counts, batch_labels in batches: 
+        batch_counts = np.concatenate(([0], batch_counts))
+        cum_inds = tuple(np.array([np.cumsum(batch_counts[:i+1])[-1] for i in range(len(batch_counts))], np.int64))
+        try:
+            batch_words = jnp.array(flatten_list(batch_words), jnp.int64)
+        except:
+            batch_words = jnp.array(batch_words, jnp.int64)
+        acc += get_accs(params, batch_words, ns, cum_inds, batch_labels) / n
+    return acc
+
+val_acc = evaluate(val_data, len(val_data['words']))
 print("Initial acc  {:0.2f}  ".format(val_acc))
 val_accs.append(val_acc)
 
 for epoch in range(conf['n_epochs']):
     start_time = time.time()
 
-    sum_loss = []
-    for batch_words, batch_counts, batch_labels in tqdm(get_batches(train_data['words'], train_data['counts'], train_data['labels'], batch_size)): # this was 16 untul 30th for sm reason!!!
+    loss = 0
+    batches = get_batches(train_data['words'], train_data['counts'], train_data['labels'], batch_size)
+    for batch_words, batch_counts, batch_labels in tqdm(batches): # this was 16 untul 30th for sm reason!!!
         batch_counts.insert(0,0)
         cum_inds = tuple(np.array([np.cumsum(batch_counts[:i+1])[-1] for i in range(len(batch_counts))], np.int64)) 
         try:
             batch_words = jnp.array(flatten_list(batch_words), jnp.int64)
-            cost, params, opt_state = train_step(params, opt_state, batch_words, batch_labels, cum_inds, ns)
         except:
             batch_words = jnp.array(batch_words, jnp.int64)
-            cost, params, opt_state = train_step(params, opt_state, batch_words, batch_labels, cum_inds, ns)
-        sum_loss.append(cost)
+        cost, params, opt_state = train_step(params, opt_state, batch_words, batch_labels, cum_inds, ns)
+        loss += cost / len(train_data['labels'])
 
-    cost = np.sum(sum_loss) / len(train_data['labels'])
-    losses.append(cost)
+    losses.append(loss)
     all_params.append(params)
 
-    sum_accs = []
-    for batch_words, batch_counts, batch_labels in tqdm(get_batches(val_data['words'], val_data['counts'], val_data['labels'], batch_size)): 
-        batch_counts = np.concatenate(([0], batch_counts))
-        cum_inds = tuple(np.array([np.cumsum(batch_counts[:i+1])[-1] for i in range(len(batch_counts))], np.int64)) 
-        try:
-            batch_words = jnp.array(flatten_list(batch_words), jnp.int64)
-            acc = get_accs(params, batch_words, ns, cum_inds, batch_labels)
-        except:
-            batch_words = jnp.array(batch_words, jnp.int64)
-            acc = get_accs(params, batch_words, ns, cum_inds, batch_labels)
-        sum_accs.append(acc)
-
-    val_acc = np.sum(sum_accs) / len(val_data['labels'])
+    val_acc = evaluate(val_data, len(val_data['words']))
+    val_accs.append(val_acc)
     epoch_time = time.time() - start_time
     print("Epoch {} in {:0.2f} sec".format(epoch, epoch_time))
-    print("Loss  {:0.2f}  ".format(cost))
-    print("Acc  {:0.2f}  ".format(val_acc))
-    val_accs.append(val_acc)
-    
-    sum_accs = []
-    for batch_words, batch_counts, batch_labels in tqdm(get_batches(test_data['words'], test_data['counts'], test_data['labels'], batch_size)): 
-        batch_counts = np.concatenate(([0], batch_counts))
-        cum_inds = tuple(np.array([np.cumsum(batch_counts[:i+1])[-1] for i in range(len(batch_counts))], np.int64)) 
-        try:
-            batch_words = jnp.array(flatten_list(batch_words), jnp.int64)
-            acc = get_accs(params, batch_words, ns, cum_inds, batch_labels)
-        except:
-            batch_words = jnp.array(batch_words, jnp.int64)
-            acc = get_accs(params, batch_words, ns, cum_inds, batch_labels)
-        sum_accs.append(acc)
+    print("Loss  {:0.2f}".format(loss))
+    print("Val Acc  {:0.2f}".format(val_acc))
 
-    test_acc = np.sum(sum_accs) / len(test_data['labels'])
-    print("Test acc  {:0.2f}  ".format(test_acc))
+    test_acc = evaluate(test_data, len(test_data['words']))
     test_accs.append(test_acc)
+    print("Test acc  {:0.2f}".format(test_acc))
 
-    # ------------------------------ SAVE DATA -----------------–------------ #    
-    if post_sel:
-        save_path = f'Results/{data_name}/{model}_SLIDE_{window_size}/{parse_type}/post_sel/{n_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
-    else:
-        save_path = f'Results/{data_name}/{model}_SLIDE_{window_size}/{parse_type}/discards/{n_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
+    save_dict = {
+        'params_dict': all_params,
+        'opt_state': opt_state,
+        'test_accs': test_accs,
+        'val_accs': val_accs,
+        'losses': losses,
+        'w2i': w2i
+    }
 
+    # ------------------------------ SAVE DATA -----------------–------------ #
+    timestr = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    save_path = f'../Results/{timestr}/'
     Path(save_path).mkdir(parents=True, exist_ok=True)
-    pickle.dump(obj=all_params, file=open(f'{save_path}{"param_dict"}', 'wb'))
-    pickle.dump(obj=opt_state, file=open(f'{save_path}{"final_opt_state"}', 'wb'))
-    pickle.dump(obj=test_accs, file=open(f'{save_path}{"test_accs"}', 'wb'))
-    pickle.dump(obj=val_accs, file=open(f'{save_path}{"val_accs"}', 'wb'))
-    pickle.dump(obj=losses, file=open(f'{save_path}{"loss"}', 'wb'))
-    pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
-print(save_path)
+    for key, value in save_dict.items():
+        full_save_path = f'{save_path}{key}'
+        pickle.dump(obj=value, file=open(f'{full_save_path}/{key}', 'wb'))
     # ------------------------------- SAVE DATA ---------------–------------ #
-
-

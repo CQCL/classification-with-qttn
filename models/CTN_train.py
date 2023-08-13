@@ -27,7 +27,7 @@ tn.set_default_backend("jax")
 
 np.random.seed(0)
 
-with open('SCTN_config.yaml', 'r') as f:
+with open('CTN_config.yaml', 'r') as f:
     conf = yaml.safe_load(f)
 
 n_qubits = conf['n_qubits'] # number of qubits per word
@@ -172,6 +172,7 @@ def hCTN(W_params, U_params, I_params, class_params, ns):
 CTN = uCTN if parse_type == 'unibox' else hCTN
 vmap_contract = vmap(CTN, (0, None, None, None, None))
 
+# TODO is this needed?
 def get_preds(params, batch_words, ns):
     b_params = params['words'][batch_words]
     b_Us = params['Us']

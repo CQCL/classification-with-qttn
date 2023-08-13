@@ -14,6 +14,8 @@ import pickle
 import optax
 import yaml
 
+from datetime import datetime
+
 from ansatz import apply_box, make_density_matrix, make_state_vector
 from ansatz import IQPAnsatz, Ansatz9, Ansatz14
 
@@ -220,9 +222,9 @@ for epoch in range(conf['n_epochs']):
     losses.append(loss)
     all_params.append(params)
 
-    print("Loss  {:0.2f}  ".format(loss))
+    print("Loss  {:0.2f}".format(loss))
     val_acc = evaluate(val_data, n_val)
-    print("Val Acc  {:0.2f}  ".format(val_acc))
+    print("Val Acc  {:0.2f}".format(val_acc))
     val_accs.append(val_acc)
 
     test_acc = evaluate(test_data, n_test)
@@ -242,7 +244,8 @@ for epoch in range(conf['n_epochs']):
     }
 
     # ------------------------------ SAVE DATA -----------------–------------ #
-    save_path = f'../Results'
+    timestr = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    save_path = f'../Results/{timestr}/'
     Path(save_path).mkdir(parents=True, exist_ok=True)
     for key, value in save_dict.items():
         full_save_path = f'{save_path}{key}'

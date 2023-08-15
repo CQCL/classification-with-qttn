@@ -429,14 +429,14 @@ for parse_type in ['height']: # ['unibox', 'rule', 'height']:
     print("Saving PATH / TREE reduced data")
     if include_SCTN:
         if reduce_train:
-            save_path = f'Data/STTN/{save_name}/{thr}_{number_of_structures}_REDUCED_{reduce_val}/{parse_type}/'
+            save_path = f'Data/STN/{save_name}/{thr}_{number_of_structures}_REDUCED_{reduce_val}/{parse_type}/'
         else:
-            save_path = f'Data/STTN/{save_name}/{thr}_{number_of_structures}/{parse_type}/'
+            save_path = f'Data/STN/{save_name}/{thr}_{number_of_structures}/{parse_type}/'
     else:
         if reduce_train:
-            save_path = f'Data/STTN/{save_name}/REDUCED_{reduce_val}/{parse_type}/'
+            save_path = f'Data/STN/{save_name}/REDUCED_{reduce_val}/{parse_type}/'
         else:
-            save_path = f'Data/STTN/{save_name}/{parse_type}/'
+            save_path = f'Data/STN/{save_name}/{parse_type}/'
     Path(save_path).mkdir(parents=True, exist_ok=True)
     pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
     pickle.dump(obj=r2i, file=open(f'{save_path}{"r2i"}', 'wb'))

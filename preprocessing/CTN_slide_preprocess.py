@@ -65,7 +65,7 @@ tokenizer.disable_pipes(
 )
 tokenizer.enable_pipe("senter")
 
-if data_name == 'RT':
+if data_name == 'rotten-tomatoes':
     
     with open('Data/pos.txt') as f:
         pos_lines = [line.strip() for line in f if line.strip()]
@@ -100,12 +100,12 @@ elif data_name == 'IMDb':
     min_freq = 1
     w2i = compute_w2i(sents, min_freq)
 
-elif data_name == 'genome':
+elif data_name == 'protein-binding':
 
-    with open('Data/genome_seqs.txt') as f:
+    with open('Data/protein-binding_seqs.txt') as f:
         all_lines = [line.strip() for line in f]
 
-    with open('Data/genome_labels.txt') as f:
+    with open('Data/protein-binding_labels.txt') as f:
         all_labels = [line.strip() for line in f]
 
     pos_sents = []

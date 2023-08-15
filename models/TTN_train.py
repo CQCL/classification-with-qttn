@@ -114,16 +114,13 @@ def measure(out_vec, class_params):
 
 vmap_word_vec_init = jit(vmap(word_vec_init)) # vmap over initial states in a tree
 
-def combine(vecs, rule_offset): # update correct tree state according to rule offsets
+def merge(vecs, rule_offset): # update correct tree state according to rule offsets
     rule = rule_offset[:-2]
     idx1, idx2 = jnp.array(rule_offset[-2:], dtype=jnp.int32)
 
     input_vec1 = vecs[idx1]
     input_vec2 = vecs[idx2]
     new_vec = PQC(jnp.array(rule), input_vec1, input_vec2)
-    # print(vecs.shape)
-    # print(vecs[0].shape)
-    # print(new_vec.shape)
     out = vecs.at[idx1].set(new_vec)
 
     return out, out
@@ -131,7 +128,7 @@ def combine(vecs, rule_offset): # update correct tree state according to rule of
 def contract(word_params, rules, offsets, class_params): # scan contractions down the tree
     input_vecs = vmap_word_vec_init(word_params)
     rules_offs = jnp.concatenate((rules, offsets), axis=1)
-    input_vecs, _ = jax.lax.scan(combine, init=input_vecs, xs=rules_offs)
+    input_vecs, _ = jax.lax.scan(merge, init=input_vecs, xs=rules_offs)
     preds = measure(input_vecs[0], class_params)
     return preds
 
@@ -148,7 +145,7 @@ def get_loss(params, batch_words, batch_rules, batch_offsets, labels):
     if not conf['use_jit']:
         assert all(jnp.allclose(jnp.sum(pred), jnp.ones(1), atol=1e-3)  for pred in preds)
 
-    out = jnp.array([jnp.dot(label, jnp.log(pred+1e-7)) for pred, label in zip(preds, jnp.array(labels))])
+    out = jnp.array([jnp.dot(label, jnp.log(pred+1e-7)) for pred, label in zip(preds, labels)])
 
     return -jnp.sum(out)
 
@@ -171,7 +168,7 @@ def train_step(params, opt_state, batch_words, batch_rules, batch_offsets, batch
 
 def get_accs(params, batch_words, batch_rules, batch_offsets, labels):
     
-    preds = vmap_contract(params['words'][jnp.array(batch_words)], params['rules'][jnp.array(batch_rules)], jnp.array(batch_offsets), params['class'])
+    preds = vmap_contract(params['words'][batch_words], params['rules'][batch_rules], batch_offsets, params['class'])
     
     if conf['post_sel']:
         preds = preds / jnp.sum(preds, axis=1)[:,None] # renormalise output
@@ -187,39 +184,41 @@ def random(size):
     return jnp.array(np.random.uniform(0, conf['init_val'], size=size))
 
 def get_batches(words, rules, offsets, labels, batch_size):
+    for s in gen_batches(len(labels), batch_size):
+        word = [jnp.array(s) for s in words[s]]
+        rule = [jnp.array(r) for r in rules[s]]
+        offset = [jnp.array(o) for o in offsets[s]]
+        label = jnp.array(labels[s])
 
-    slices = list(gen_batches(len(labels), batch_size))
-    batched_w = [words[s] for s in slices]
-    batched_r = [rules[s] for s in slices]
-    batched_o = [offsets[s] for s in slices]
-    batched_l = [labels[s] for s in slices]
+        yield word, rule, offset, label
 
-    return zip(batched_w, batched_r, batched_o, batched_l)
+def pad_right(v, n, pad_value):
+    """ pad vector v on the right with n values of pad_value """
+    # return jnp.pad(v, (0, n), constant_values=pad_value)
+    if n == 0:
+        return v
+    if len(v) == 0:
+        return np.array([pad_value] * n)
+    return np.concatenate((v, [pad_value] * n))
 
 def pad_trees(batch_words, batch_rules, batch_offsets, max_words, words_pad_idx, rules_pad_idx):
     pad_words = []
     pad_rules = []
     pad_offsets = []
+
+    # pad offsets with unused indices: void[-2] = merge(void[-2], void[-1])
+    void_idx = [max_words - 2, max_words - 1]
     for words, rules, offsets in zip(batch_words, batch_rules, batch_offsets):
         pad_len = max_words-len(words)
-        if pad_len!=0:
-            pad_words.append(np.concatenate((words, words_pad_idx*np.ones(shape=(pad_len), dtype=np.int32))))
-            if len(words)==1:
-                pad_rules.append(rules_pad_idx*np.ones(shape=(pad_len), dtype=np.int32))
-                pad_offsets.append([[int(max_words-2), int(max_words-1)]]*(pad_len)) # void pad indices
-            else:
-                pad_rules.append(np.concatenate((rules, rules_pad_idx*np.ones(shape=(pad_len), dtype=np.int32))))
-                pad_offsets.append(np.concatenate((offsets, [[int(max_words-2), int(max_words-1)]]*(pad_len)))) # void pad indices
-        else:
-            pad_words.append(words)
-            pad_rules.append(rules)
-            pad_offsets.append(offsets)
-    return pad_words, pad_rules, pad_offsets
+        pad_words.append(pad_right(words, pad_len, words_pad_idx))
+        pad_rules.append(pad_right(rules, pad_len, rules_pad_idx))
+        pad_offsets.append(pad_right(offsets, pad_len, void_idx))
+    return jnp.array(pad_words), jnp.array(pad_rules), jnp.array(pad_offsets)
 
 n_words = max(w2i.values())
 n_rules = max(r2i.values())
 
-print("Rule(s): ", r2i.keys())
+print("Rule(s): ", list(r2i.keys()))
 print("Number of unique tokens: ", n_words+1)
 print("Number of unique rules: ", n_rules+1)
 
@@ -230,15 +229,10 @@ rule_emb_size = ansatz.n_params(2 * n_qubits)
 words_pad_idx = n_words+1
 rules_pad_idx = n_rules+1
 
-max_words = max([len(words) for words in np.concatenate((train_data["words"], val_data["words"], test_data["words"]))])
+max_words = max([len(words) for data in [train_data, val_data, test_data]
+                            for words in data['words']])
 
-
-if discard:
-    test_density_matrix = jnp.array(range(16)).reshape(2,2,2,2)
-    eval_density_matrix = box_vec(test_density_matrix, 2).eval(**eval_args).array 
-
-    if not np.allclose(test_density_matrix, eval_density_matrix):
-        raise Exception("You need to install the GitHub version of discopy, check README.")
+print("Max tree width: ", max_words)
 
 if conf['use_optax_reg'] is True:
     optimizer = optax.adamw(conf['lr'])
@@ -259,10 +253,10 @@ all_params = []
 
 def evaluate(data, n):
     acc = 0
-    for (batch_words, batch_rules, batch_offsets, batch_labels) in tqdm(get_batches(data["words"], data["rules"], data["offsets"], data["labels"], conf['batch_size'])):
-        pad_words, pad_rules, pad_offsets = pad_trees(batch_words, batch_rules, batch_offsets, max_words, words_pad_idx, rules_pad_idx)
-        pad_words = np.array(pad_words, dtype = np.int64)
-        batch_acc = get_accs(params, pad_words, pad_rules, pad_offsets, batch_labels)
+    batches = get_batches(data["words"], data["rules"], data["offsets"], data["labels"], conf['batch_size'])
+    for b_words, b_rules, b_offsets, b_labels in tqdm(batches):
+        pad_words, pad_rules, pad_offsets = pad_trees(b_words, b_rules, b_offsets, max_words, words_pad_idx, rules_pad_idx)
+        batch_acc = get_accs(params, pad_words, pad_rules, pad_offsets, b_labels)
         acc += batch_acc
     return acc / n
 
@@ -272,15 +266,13 @@ print("Initial acc  {:0.2f}  ".format(val_acc))
 val_accs.append(val_acc)
 
 for epoch in range(conf['n_epochs']):
-
     start_time = time.time()
 
-    # calc cost and update params
     loss = 0
-    for batch_words, batch_rules, batch_offsets, batch_labels in tqdm(get_batches(train_data["words"], train_data["rules"], train_data["offsets"], train_data["labels"], batch_size)): # all length x examples batches together for jax 
-        pad_words, pad_rules, pad_offsets = pad_trees(batch_words, batch_rules, batch_offsets, max_words, words_pad_idx, rules_pad_idx)
-        pad_words = np.array(pad_words, dtype = np.int64)
-        cost, params, opt_state = train_step(params, opt_state, pad_words, pad_rules, pad_offsets, batch_labels)
+    batches = get_batches(train_data["words"], train_data["rules"], train_data["offsets"], train_data["labels"], conf['batch_size'])
+    for b_words, b_rules, b_offsets, b_labels in tqdm(batches):
+        pad_words, pad_rules, pad_offsets = pad_trees(b_words, b_rules, b_offsets, max_words, words_pad_idx, rules_pad_idx)
+        cost, params, opt_state = train_step(params, opt_state, pad_words, pad_rules, pad_offsets, b_labels)
         loss += cost / len(train_data['labels'])
 
     losses.append(loss)
@@ -310,8 +302,7 @@ for epoch in range(conf['n_epochs']):
     # ------------------------------ SAVE DATA -----------------–------------ #
     timestr = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     save_path = f'../Results/{conf["model"]}/{conf["data_name"]}/{conf["parse_type"]}/{timestr}/'
+    Path(save_path).mkdir(parents=True, exist_ok=True)
     for key, value in save_dict.items():
-        full_save_path = f'{save_path}{key}'
-        Path(full_save_path).mkdir(parents=True, exist_ok=True)
-        pickle.dump(obj=value, file=open(f'{full_save_path}/{key}', 'wb'))
+        pickle.dump(obj=value, file=open(f'{save_path}{key}', 'wb'))
     # ------------------------------- SAVE DATA ---------------–------------ #

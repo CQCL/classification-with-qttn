@@ -244,8 +244,7 @@ for epoch in range(conf['n_epochs']):
 
     # ------------------------------ SAVE DATA -----------------–------------ #
     timestr = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    save_path = f'../Results/{conf["model"]}/{conf["data_name"]}/{conf["parse_type"]}/{timestr}/'
+    save_path = f'../Results/SCTN/{conf["data_name"]}/{conf["parse_type"]}/{timestr}/'
     Path(save_path).mkdir(parents=True, exist_ok=True)
     for key, value in save_dict.items():
-        full_save_path = f'{save_path}{key}'
-        pickle.dump(obj=value, file=open(f'{full_save_path}/{key}', 'wb'))
+        pickle.dump(obj=value, file=open(f'{save_path}{key}', 'wb'))

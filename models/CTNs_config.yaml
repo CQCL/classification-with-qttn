@@ -1,5 +1,5 @@
 window_size: 8
-data_name: 'genome' # rotten_tomatoes / Protein-binding / IMDb - all works 
+data_name: 'protein-binding' # rotten-tomatoes / protein-binding / IMDb
 use_jit: True
 post_sel: True
 use_grad_clip: True

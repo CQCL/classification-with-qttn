@@ -8,7 +8,7 @@ from discopy.rigid import Box, Id
 
 data_name = 'protein-binding' # length 50 dna seqs
 w2i = dict({'A':0, 'G':1, 'C': 2, 'T':3})
-thr = 64
+thr = 32
 pad_idx = 4
 
 with open('Data/protein-binding_seqs.txt') as f:
@@ -121,9 +121,9 @@ train_sents, test_sents, train_labels, test_labels = train_test_split(train_sent
 train_words, train_labels = pad_CTN(train_sents, train_labels, thr, w2i, pad_idx)
 val_words, val_labels = pad_CTN(val_sents, val_labels, thr, w2i, pad_idx)
 test_words, test_labels = pad_CTN(test_sents, test_labels, thr, w2i, pad_idx)
-train_dict_CTN = {"words": train_words, "labels": train_labels}
-val_dict_CTN = {"words": val_words, "labels": val_labels}
-test_dict_CTN = {"words": test_words, "labels": test_labels}
+train_dict_CTN = {"words": train_words[-1], "labels": train_labels[-1]}
+val_dict_CTN = {"words": val_words[-1], "labels": val_labels[-1]}
+test_dict_CTN = {"words": test_words[-1], "labels": test_labels[-1]}
 
 print("CTN Train examples: ", len(train_dict_CTN["words"]))
 print("CTN Validation examples: ", len(val_dict_CTN["words"]))
@@ -138,20 +138,15 @@ pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
 pickle.dump(obj=train_dict_CTN, file=open(f'{save_path}{"train_data"}', 'wb'))
 pickle.dump(obj=val_dict_CTN, file=open(f'{save_path}{"val_data"}', 'wb'))
 pickle.dump(obj=test_dict_CTN, file=open(f'{save_path}{"test_data"}', 'wb'))
-
-train_dict_TTN = {"words": train_words[-1], "labels": train_labels[-1]}
-val_dict_TTN = {"words": val_words[-1], "labels": val_labels[-1]}
-test_dict_TTN = {"words": test_words[-1], "labels": test_labels[-1]}
-
 if thr < 64:
-    save_path = f'Data/TTN/{data_name}_cut_{thr}/'    
+    save_path = f'Data/TTN/{data_name}_cut_LAST_{thr}/'    
 else:
     save_path = f'Data/TTN/{data_name}/'
 Path(save_path).mkdir(parents=True, exist_ok=True)
 pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
-pickle.dump(obj=train_dict_TTN, file=open(f'{save_path}{"train_data"}', 'wb'))
-pickle.dump(obj=val_dict_TTN, file=open(f'{save_path}{"val_data"}', 'wb'))
-pickle.dump(obj=test_dict_TTN, file=open(f'{save_path}{"test_data"}', 'wb'))
+pickle.dump(obj=train_dict_CTN, file=open(f'{save_path}{"train_data"}', 'wb'))
+pickle.dump(obj=val_dict_CTN, file=open(f'{save_path}{"val_data"}', 'wb'))
+pickle.dump(obj=test_dict_CTN, file=open(f'{save_path}{"test_data"}', 'wb'))
 # -------------------------------------- PTN process----------------------------------- #
 
 # get r2i
@@ -191,9 +186,9 @@ print("hPTN Validation examples: ", len(uPTN_val_dict["words"]))
 print("hPTN Test examples: ", len(uPTN_test_dict["words"]))
 
 if thr < 64:
-    save_path = f'Data/PTN/{data_name}_cut_{thr}/unibox/'    
+    save_path = f'Data/PTN/{data_name}_cut_{thr}/unibox'    
 else:
-    save_path = f'Data/PTN/{data_name}/unibox/'
+    save_path = f'Data/PTN/{data_name}/unibox'
 Path(save_path).mkdir(parents=True, exist_ok=True)
 pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
 pickle.dump(obj=Hr2i, file=open(f'{save_path}{"r2i"}', 'wb'))
@@ -229,7 +224,7 @@ print("hPTN Test examples: ",len(hPTN_test_dict["words"]))
 if thr < 64:
     save_path = f'Data/PTN/{data_name}_cut_{thr}/height'    
 else:
-    save_path = f'Data/PTN/{data_name}/height/'
+    save_path = f'Data/PTN/{data_name}/height'
 Path(save_path).mkdir(parents=True, exist_ok=True)
 pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
 pickle.dump(obj=Hr2i, file=open(f'{save_path}{"r2i"}', 'wb'))

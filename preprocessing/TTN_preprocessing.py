@@ -3,14 +3,14 @@ import math
 import pickle 
 from pathlib import Path
 
-data_name = 'genome'
+data_name = 'protein-binding'
 model = 'TTN'
 thr = 32
 
 def flatten_list(li):
     return [y for x in li for y in x]
 
-if data_name == 'genome':
+if data_name == 'protein-binding':
     print("Reading in data ... ")
     if thr == 64:
         save_path = f'Data/{model}/{data_name}/'
@@ -21,7 +21,7 @@ if data_name == 'genome':
     val_data = pickle.load(file=open(f'{save_path}{"val_data"}', 'rb'))
     test_data = pickle.load(file=open(f'{save_path}{"test_data"}', 'rb'))
 
-elif data_name in ['clickbait', 'RT']:
+elif data_name in ['clickbait', 'rotten-tomatoes']:
     data_name = f'{data_name}_full'
     parse_type = 'unibox'
     save_path = f'Data/{model}/{data_name}/{parse_type}/'
@@ -116,7 +116,7 @@ indx = [i for i in range(max_words-1)]
 Hr2i = dict(zip(all_rules, indx))
 Ur2i = dict({'UNIBOX':0})
 
-if data_name == 'genome':
+if data_name == 'protein-binding':
     if thr == 64:
         save_path = f'Data/{model}/{data_name}/unibox/'
     else:
@@ -130,7 +130,7 @@ pickle.dump(obj=train_dict_u, file=open(f'{save_path}{"train_data"}', 'wb'))
 pickle.dump(obj=val_dict_u, file=open(f'{save_path}{"val_data"}', 'wb'))
 pickle.dump(obj=test_dict_u, file=open(f'{save_path}{"test_data"}', 'wb'))
 
-if data_name == 'genome':
+if data_name == 'protein-binding':
     if thr == 64:
         save_path = f'Data/{model}/{data_name}/height/'
     else:
@@ -166,7 +166,7 @@ indx = [i for i in range(max_words-1)]
 Hr2i = dict(zip(all_rules, indx))
 Ur2i = dict({'UNIBOX':0})
 
-if data_name == 'genome':
+if data_name == 'protein-binding':
     if thr == 64:
         save_path = f'Data/{model}/{data_name}/unibox/'
     else:
@@ -180,7 +180,7 @@ pickle.dump(obj=train_dict_u, file=open(f'{save_path}{"train_data"}', 'wb'))
 pickle.dump(obj=val_dict_u, file=open(f'{save_path}{"val_data"}', 'wb'))
 pickle.dump(obj=test_dict_u, file=open(f'{save_path}{"test_data"}', 'wb'))
 
-if data_name == 'genome':
+if data_name == 'protein-binding':
     if thr == 64:
         save_path = f'Data/{model}/{data_name}/height/'
     else:

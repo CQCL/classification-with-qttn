@@ -309,7 +309,6 @@ for epoch in range(conf['n_epochs']):
     # ------------------------------ SAVE DATA -----------------–------------ #
     timestr = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     save_path = f'../Results/CTN/{conf["data_name"]}/{conf["parse_type"]}/{timestr}/'
+    Path(save_path).mkdir(parents=True, exist_ok=True)
     for key, value in conf.items():
-        full_save_path = f'{save_path}{key}'
-        Path(full_save_path).mkdir(parents=True, exist_ok=True)
-        pickle.dump(obj=value, file=open(f'{full_save_path}/{key}', 'wb'))
+        pickle.dump(obj=value, file=open(f'{save_path}{key}', 'wb'))

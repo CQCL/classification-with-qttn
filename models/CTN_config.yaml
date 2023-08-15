@@ -1,4 +1,4 @@
-data_name: 'Protein-binding' # Proetein-binding / clickbait - ALL WORKING
+data_name: 'protein-binding' # Proetein-binding / clickbait - ALL WORKING
 use_jit: True
 post_sel: True
 use_grad_clip: True

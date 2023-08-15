@@ -8,9 +8,9 @@ import spacy
 from discopy.rigid import Box, Id
 from tqdm import tqdm
 
-data = 'RT'
+data = 'rotten-tomatoes'
 print("Data: ", data)
-assert data in ['clickbait', 'RT']
+assert data in ['clickbait', 'rotten-tomatoes']
 
 parser = TreeReader(mode = TreeReaderMode.RULE_ONLY)
 
@@ -99,7 +99,7 @@ if data == 'clickbait':
     with open('Data/non_clickbait.txt') as f:
         neg_lines = [line.strip() for line in f if line.strip()]
 
-elif data == 'RT':
+elif data == 'rotten-tomatoes':
     with open('Data/pos.txt') as f:
         pos_lines = [line.strip() for line in f if line.strip()]
 

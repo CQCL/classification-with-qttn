@@ -1,5 +1,5 @@
 model: 'STN'
-data_name: 'clickbait' # clickbait, rotten-tomatoes, Protein-binding
+data_name: 'clickbait' # clickbait, rotten-tomatoes, protein-binding
 use_jit: True
 post_sel: True
 use_grad_clip: True

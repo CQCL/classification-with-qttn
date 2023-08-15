@@ -139,7 +139,7 @@ vmap_contract = jit(vmap(contract, (0,0,0,None))) # vmap over all trees in batch
 
 def get_loss(params, batch_words, batch_rules, batch_offsets, labels):
     b_params = params['words'][batch_words]
-    b_rules = params['rules'][jnp.array(batch_rules)]
+    b_rules = params['rules'][batch_rules]
     preds = vmap_contract(b_params, b_rules, batch_offsets, params['class'])
 
     if conf['post_sel']:
@@ -231,6 +231,7 @@ words_pad_idx = n_words+1
 rules_pad_idx = n_rules+1
 
 max_words = max([len(words) for words in np.concatenate((train_data["words"], val_data["words"], test_data["words"]))])
+
 
 if discard:
     test_density_matrix = jnp.array(range(16)).reshape(2,2,2,2)

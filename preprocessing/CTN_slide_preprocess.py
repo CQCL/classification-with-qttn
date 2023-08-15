@@ -7,7 +7,6 @@ import spacy
 from sklearn.model_selection import train_test_split
 import pandas as pd
 
-
 def tokenize(lines):
     print("Tokenizing ...")
     tok_sents = []
@@ -83,7 +82,7 @@ if data_name == 'RT':
     min_freq = 1
     w2i = compute_w2i(sents, min_freq)
 
-elif data_name == 'IMDb': # 50,000 reviews
+elif data_name == 'IMDb':
     
     df = pd.read_csv('IMDB_data.csv') 
     labels = df['sentiment']
@@ -124,15 +123,6 @@ elif data_name == 'genome':
     labels = np.concatenate(([[1,0]]*len(pos_sents),[[0,1]]*len(neg_sents)))
     min_freq = 1
     w2i = compute_w2i(sents, min_freq)
-
-elif data_name == 'gen':
-    window = 10
-    save_path = f'Results/TTN_bio_gen_weak_sim_mem_window_{window}/CTN_slide_test/'
-    w2i = pickle.load(file=open(f'{save_path}{"w2i"}', 'rb'))
-    test_sents = pickle.load(file=open(f'{save_path}{"gen_samples"}', 'rb'))
-    test_labels = pickle.load(file=open(f'{save_path}{"labels"}', 'rb'))
-    print(test_sents[0])
-    
 
 # transfer to w2i 
 window_size = 4

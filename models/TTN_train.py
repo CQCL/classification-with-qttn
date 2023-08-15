@@ -14,9 +14,12 @@ import pickle
 import numpy as np
 import pickle
 import optax
+import yaml
 
 from ansatz import apply_box, make_density_matrix, make_state_vector
 from ansatz import IQPAnsatz, Ansatz9, Ansatz14
+
+from datetime import datetime
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -29,59 +32,14 @@ np.random.seed(0)
 seed = 0
 key = jax.random.PRNGKey(seed)
 
-with open('CTN_config.yaml', 'r') as f:
+with open('TTN_config.yaml', 'r') as f:
     conf = yaml.safe_load(f)
 
-# ------------------------------------- SETTINGS -------------------------------- #
-model = 'PTN'
-syntactic = model == 'STTN'
-assert model in ['PTN', 'TTN', 'STTN']
-
-data_name = 'RT'
-reduce_train = False
-cut = False
-
-if data_name == 'clickbait':
-    reduce_val = 2031
-else:
-    reduce_val = 2352
-thr = 16
-if thr == 64:
-    save_name = f'{data_name}_full'
-else:
-    save_name = data_name
-save_name = data_name
-number_of_structures = 100
-
-if data_name == 'genome':
-    batch_size = 16
-    assert syntactic == False, "No syntax defined for genome data, please chose PTN or TTN model}."
-else:
-    batch_size = 64
-
-post_sel = True
-use_jit = True
-use_grad_clip = True
-use_dropout = False
-use_param_reg = False 
-use_optax_reg = True
-grad_clip = 100.0
-n_epochs = 15
-init_val = 0.01
-ansatz = 'A14'
-# ------------------------------------- SETTINGS -------------------------------- #
-
-if model == 'TTN':
-    parse_types = ['unibox', 'rule', 'height']
-elif model in ['PTN', 'TTN']:
-    parse_types = ['unibox', 'height']
-
-parse_type = 'unibox'
 
 # ------------------------------- READ IN DATA ---------------------------- #
 print("Reading in data ... ")
 
-load_path = f'Data/{model}/{data_name}/{parse_type}/'
+load_path = f'../Data/{conf["model"]}/{conf["data_name"]}/{conf["parse_type"]}/'
 
 w2i = pickle.load(file=open(f'{load_path}{"w2i"}', 'rb'))
 r2i = pickle.load(file=open(f'{load_path}{"r2i"}', 'rb'))
@@ -89,20 +47,14 @@ train_data = pickle.load(file=open(f'{load_path}{"train_data"}', 'rb'))
 val_data = pickle.load(file=open(f'{load_path}{"val_data"}', 'rb'))
 test_data = pickle.load(file=open(f'{load_path}{"test_data"}', 'rb'))
 
-N = int(np.ceil(len(train_data['words'])/4))
-train_data['words'] = train_data['words'][:N]
-train_data['rules'] = train_data['rules'][:N]
-train_data['offsets'] = train_data['offsets'][:N]
-train_data['labels'] = train_data['labels'][:N]
-
 print("Number of train examples: ", len(train_data["labels"]))
 print("Number of val examples: ", len(val_data["labels"]))
 print("Number of test examples: ", len(test_data["labels"]))
 # ------------------------------- READ IN DATA ----------------------------- #
 
-n_qubits = 1
-n_layers = 1
-lr = 0.01
+n_qubits = conf['n_qubits'] # number of qubits per word
+init_val = conf['init_val']
+batch_size = conf['batch_size']
             
 if not conf['use_jit']: 
     jit = lambda x: x
@@ -113,16 +65,6 @@ eval_args = {
     'mixed': discard, # use density matrices if discarding 
     'contractor': tn.contractors.auto # use tensor networks if speed
 }
-
-print("Use syntax: ", syntactic)
-print("Number of epochs: ", n_epochs)
-print("Batch size: ", batch_size)
-print("Ansatz: ", ansatz)
-print("Number of word qubits: ", n_qubits)
-print("Number of layers: ", n_layers)
-print("Using post selection: ", post_sel)
-print("Init value: ", init_val)
-print("Using gradient clipping: ", use_grad_clip)
 
 if conf['ansatz'] == 'IQP':
     ansatz = IQPAnsatz(conf['n_layers'], discard=discard)
@@ -145,14 +87,14 @@ def word_vec_init(word_params):
 
 def PQC(rule_params, vec1, vec2):
     """ apply rule with two density matrices as input """
-    circ = box_vec(n_qubits, vec1) @ box_vec(n_qubits, vec2)
-    circ >>= ansatz(dom=2 * n_qubits, cod=2 * n_qubits, params=rule_params)
+    circ = box_vec(vec1, n_qubits) @ box_vec(vec2, n_qubits)
+    circ >>= ansatz(dom=2 * n_qubits, cod=n_qubits, params=rule_params)
     out = circ.eval(**eval_args).array
     return out
 
 def measure(out_vec, class_params):
     """ apply classification box and measure classification qubit """
-    circ = box_vec(n_qubits, out_vec)
+    circ = box_vec(out_vec, n_qubits)
 
     # apply final classification ansatz
     circ >>= ansatz(n_qubits, n_qubits, class_params)
@@ -179,6 +121,9 @@ def combine(vecs, rule_offset): # update correct tree state according to rule of
     input_vec1 = vecs[idx1]
     input_vec2 = vecs[idx2]
     new_vec = PQC(jnp.array(rule), input_vec1, input_vec2)
+    # print(vecs.shape)
+    # print(vecs[0].shape)
+    # print(new_vec.shape)
     out = vecs.at[idx1].set(new_vec)
 
     return out, out
@@ -190,12 +135,12 @@ def contract(word_params, rules, offsets, class_params): # scan contractions dow
     preds = measure(input_vecs[0], class_params)
     return preds
 
-vamp_contract = jit(vmap(contract, (0,0,0,None))) # vmap over all trees in batch
+vmap_contract = jit(vmap(contract, (0,0,0,None))) # vmap over all trees in batch
 
 def get_loss(params, batch_words, batch_rules, batch_offsets, labels):
     b_params = params['words'][batch_words]
-    b_rules = params['rules'][batch_rules]
-    preds = vamp_contract(b_params, b_rules, batch_offsets, params['class'])
+    b_rules = params['rules'][jnp.array(batch_rules)]
+    preds = vmap_contract(b_params, b_rules, batch_offsets, params['class'])
 
     if conf['post_sel']:
         preds = preds / jnp.sum(preds, axis=1)[:,None]
@@ -226,22 +171,20 @@ def train_step(params, opt_state, batch_words, batch_rules, batch_offsets, batch
 
 def get_accs(params, batch_words, batch_rules, batch_offsets, labels):
     
-    preds = vamp_contract(params['words'][jnp.array(batch_words)], params['rules'][jnp.array(batch_rules)], jnp.array(batch_offsets), params['class'])
+    preds = vmap_contract(params['words'][jnp.array(batch_words)], params['rules'][jnp.array(batch_rules)], jnp.array(batch_offsets), params['class'])
     
-    if post_sel:
-        preds = preds / jnp.sum(preds, axis=1)[:,None]
+    if conf['post_sel']:
+        preds = preds / jnp.sum(preds, axis=1)[:,None] # renormalise output
 
-    assert use_jit or all(jnp.allclose(jnp.sum(pred), jnp.ones(1), atol=1e-3)  for pred in preds)
+    if not conf['use_jit']:
+        assert all(jnp.allclose(jnp.sum(pred), jnp.ones(1), atol=1e-3)  for pred in preds)
 
     acc = np.sum([np.round(pred) == np.array(label, float) for pred, label in zip(preds, labels)]) / 2 
 
     return acc
 
-def initialise_params(no_words, word_emb_size, no_rules, rule_embed_size): # initialise word, rule and classification params
-    word_params = jnp.array(np.random.uniform(0, init_val, size=(no_words+1, word_emb_size)))
-    rule_params = jnp.array(np.random.uniform(0, init_val, size=(no_rules+1, rule_embed_size)))
-    class_params = jnp.array(np.random.uniform(0, init_val, size=(word_emb_size)))
-    return word_params, rule_params, class_params
+def random(size):
+    return jnp.array(np.random.uniform(0, conf['init_val'], size=size))
 
 def get_batches(words, rules, offsets, labels, batch_size):
 
@@ -273,147 +216,101 @@ def pad_trees(batch_words, batch_rules, batch_offsets, max_words, words_pad_idx,
             pad_offsets.append(offsets)
     return pad_words, pad_rules, pad_offsets
 
-no_words = max(w2i.values())
-no_rules = max(r2i.values())
+n_words = max(w2i.values())
+n_rules = max(r2i.values())
 
 print("Rule(s): ", r2i.keys())
-print("Number of unique tokens: ", no_words+1)
-print("Number of unique rules: ", no_rules+1)
+print("Number of unique tokens: ", n_words+1)
+print("Number of unique rules: ", n_rules+1)
 
-if ansatz == 'A14':
-    if n_qubits == 1:
-        word_emb_size = 3
-    else:
-        word_emb_size = n_qubits * 4 * n_layers
-    rule_embed_size = 2 * n_qubits * 4 * n_layers
-elif ansatz == 'A9':
-    if n_qubits == 1:
-        word_emb_size = 3
-    else:
-        word_emb_size = n_qubits * n_layers
-    rule_embed_size = 2 * n_qubits * n_layers
-elif ansatz == 'IQP':
-    if n_qubits == 1:
-        word_emb_size = 3
-    else:
-        word_emb_size = (n_qubits-1) * n_layers
-    rule_embed_size = (2 * n_qubits-1) * n_layers
+word_emb_size = ansatz.n_params(n_qubits)
+rule_emb_size = ansatz.n_params(2 * n_qubits)
 
 # pad to max tree width and batch size
-words_pad_idx = no_words # void pad params
-rules_pad_idx = no_rules
+words_pad_idx = n_words+1
+rules_pad_idx = n_rules+1
 
 max_words = max([len(words) for words in np.concatenate((train_data["words"], val_data["words"], test_data["words"]))])
 
 if discard:
     test_density_matrix = jnp.array(range(16)).reshape(2,2,2,2)
-    eval_density_matrix = make_vec(2, test_density_matrix).eval(**eval_args).array 
+    eval_density_matrix = box_vec(test_density_matrix, 2).eval(**eval_args).array 
 
     if not np.allclose(test_density_matrix, eval_density_matrix):
         raise Exception("You need to install the GitHub version of discopy, check README.")
 
-if use_optax_reg is True:
-    optim = 'adamW'
-    optimizer = optax.adamw(lr)
+if conf['use_optax_reg'] is True:
+    optimizer = optax.adamw(conf['lr'])
 else:
-    optim = 'adam'
-    optimizer = optax.adam(lr)
-
-print("Optimizer: ", optim)
-print("lr: ", lr)
+    optimizer = optax.adam(conf['lr'])
 
 # initialise optax opxtimiser
-word_params, rule_params, class_params = initialise_params(no_words+1, word_emb_size, no_rules+1, rule_embed_size)
+word_params = random((n_words + 1, word_emb_size))
+rule_params = random((n_rules + 1, rule_emb_size))
+class_params = random(word_emb_size)
 params = {'words': word_params, 'rules': rule_params, 'class': class_params}
 opt_state = optimizer.init(params)
 
-val_accuracies = []
-test_accuracies = []
+val_accs = []
+test_accs = []
 losses = []
 all_params = []
-all_opt_states = []
+
+def evaluate(data, n):
+    acc = 0
+    for (batch_words, batch_rules, batch_offsets, batch_labels) in tqdm(get_batches(data["words"], data["rules"], data["offsets"], data["labels"], conf['batch_size'])):
+        pad_words, pad_rules, pad_offsets = pad_trees(batch_words, batch_rules, batch_offsets, max_words, words_pad_idx, rules_pad_idx)
+        pad_words = np.array(pad_words, dtype = np.int64)
+        batch_acc = get_accs(params, pad_words, pad_rules, pad_offsets, batch_labels)
+        acc += batch_acc
+    return acc / n
 
 # initial acc
-sum_accs = []
-for i, (batch_words, batch_rules, batch_offsets, batch_labels) in tqdm(enumerate(get_batches(val_data["words"], val_data["rules"], val_data["offsets"], val_data["labels"], batch_size))):
-    pad_words, pad_rules, pad_offsets = pad_trees(batch_words, batch_rules, batch_offsets, max_words, words_pad_idx, rules_pad_idx)
-    pad_words = np.array(pad_words, dtype = np.int64)
-    acc = get_accs(params, pad_words, pad_rules, pad_offsets, batch_labels)
-    sum_accs.append(acc)
+val_acc = evaluate(val_data, len(val_data["labels"]))
+print("Initial acc  {:0.2f}  ".format(val_acc))
+val_accs.append(val_acc)
 
-val_acc = sum(sum_accs) / len(val_data["labels"])
-val_accuracies.append(val_acc)
-print("Initial Acc  {:0.2f}  ".format(val_acc))
-
-for epoch in range(n_epochs):
+for epoch in range(conf['n_epochs']):
 
     start_time = time.time()
 
     # calc cost and update params
-    sum_loss = []
+    loss = 0
     for batch_words, batch_rules, batch_offsets, batch_labels in tqdm(get_batches(train_data["words"], train_data["rules"], train_data["offsets"], train_data["labels"], batch_size)): # all length x examples batches together for jax 
         pad_words, pad_rules, pad_offsets = pad_trees(batch_words, batch_rules, batch_offsets, max_words, words_pad_idx, rules_pad_idx)
         pad_words = np.array(pad_words, dtype = np.int64)
         cost, params, opt_state = train_step(params, opt_state, pad_words, pad_rules, pad_offsets, batch_labels)
-        sum_loss.append(cost)
+        loss += cost / len(train_data['labels'])
 
-    sum_accs = []
-    for i, (batch_words, batch_rules, batch_offsets, batch_labels) in tqdm(enumerate(get_batches(val_data["words"], val_data["rules"], val_data["offsets"], val_data["labels"], batch_size))):
-        pad_words, pad_rules, pad_offsets = pad_trees(batch_words, batch_rules, batch_offsets, max_words, words_pad_idx, rules_pad_idx)
-        pad_words = np.array(pad_words, dtype = np.int64)
-        acc = get_accs(params, pad_words, pad_rules, pad_offsets, batch_labels)
-        sum_accs.append(acc)
-
-    val_acc = sum(sum_accs) / len(val_data["labels"])
-    cost = sum(sum_loss)/ len(train_data["labels"])
-    epoch_time = time.time() - start_time
-    print("Epoch {} in {:0.2f} sec".format(epoch, epoch_time))
-    print("Loss  {:0.2f}  ".format(cost))
-    print("Acc  {:0.2f}  ".format(val_acc))
-    val_accuracies.append(val_acc)
-    losses.append(cost)
+    losses.append(loss)
     all_params.append(params)
 
-    sum_accs = []
-    for i, (batch_words, batch_rules, batch_offsets, batch_labels) in tqdm(enumerate(get_batches(test_data["words"], test_data["rules"], test_data["offsets"], test_data["labels"], batch_size))):
-        pad_words, pad_rules, pad_offsets = pad_trees(batch_words, batch_rules, batch_offsets, max_words, words_pad_idx, rules_pad_idx)
-        pad_words = np.array(pad_words, dtype = np.int64)
-        acc = get_accs(params, pad_words, pad_rules, pad_offsets, batch_labels)
-        sum_accs.append(acc)
-    
-    test_acc = sum(sum_accs) / len(test_data["labels"])
-    test_accuracies.append(test_acc)
-    print("Test set accuracy: ", test_acc)
+    print("Loss  {:0.2f}".format(loss))
+    val_acc = evaluate(val_data, len(val_data['labels']))
+    print("Val Acc  {:0.2f}".format(val_acc))
+    val_accs.append(val_acc)
+
+    test_acc = evaluate(test_data, len(test_data['labels']))
+    print("Test Acc: ", test_acc)
+    test_accs.append(test_acc)
+
+    epoch_time = time.time() - start_time
+    print("Epoch {} in {:0.2f} sec".format(epoch, epoch_time))
+
+    save_dict = {
+        'params_dict': all_params,
+        'opt_state': opt_state,
+        'test_accs': test_accs,
+        'val_accs': val_accs,
+        'losses': losses,
+        'w2i': w2i
+    }
 
     # ------------------------------ SAVE DATA -----------------–------------ #
-    if reduce_train:
-        if post_sel:
-            if cut:
-                save_path = f'Results/{save_name}/{model}/{parse_type}/post_sel/{thr}_{number_of_structures}_REDUCED_{reduce_val}/{n_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
-            else:
-                save_path = f'Results/{save_name}/{model}/{parse_type}/post_sel/REDUCED_{reduce_val}/{n_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
-        else:
-            if cut:
-                save_path = f'Results/{save_name}/{model}/{parse_type}/discards/{thr}_{number_of_structures}_REDUCED_{reduce_val}/{n_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
-            else:
-                save_path = f'Results/{save_name}/{model}/{parse_type}/discards/REDUCED_{reduce_val}/{n_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
-    else:
-        if post_sel:
-            if cut:
-                save_path = f'Results/{save_name}/{model}/{parse_type}/post_sel/{thr}_{number_of_structures}/{n_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
-            else:
-                save_path = f'Results/{save_name}/{model}/{parse_type}/post_sel/{n_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
-        else:
-            if cut:
-                save_path = f'Results/{save_name}/{model}/{parse_type}/discards/{thr}_{number_of_structures}/{n_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
-            else:
-                save_path = f'Results/{save_name}/{model}/{parse_type}/discards/{n_qubits}qb_{n_layers}lay_{ansatz}/{optim}_lr_{lr}_batch_{batch_size}/'
-                        
-    Path(save_path).mkdir(parents=True, exist_ok=True)
-    pickle.dump(obj=all_params, file=open(f'{save_path}{"param_dict"}', 'wb'))
-    pickle.dump(obj=opt_state, file=open(f'{save_path}{"final_opt_state"}', 'wb'))
-    pickle.dump(obj=test_accuracies, file=open(f'{save_path}{"test_accs"}', 'wb'))
-    pickle.dump(obj=val_accuracies, file=open(f'{save_path}{"val_accs"}', 'wb'))
-    pickle.dump(obj=losses, file=open(f'{save_path}{"loss"}', 'wb'))
-    pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
+    timestr = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    save_path = f'../Results/{conf["model"]}/{conf["data_name"]}/{conf["parse_type"]}/{timestr}/'
+    for key, value in save_dict.items():
+        full_save_path = f'{save_path}{key}'
+        Path(full_save_path).mkdir(parents=True, exist_ok=True)
+        pickle.dump(obj=value, file=open(f'{full_save_path}/{key}', 'wb'))
     # ------------------------------- SAVE DATA ---------------–------------ #

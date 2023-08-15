@@ -1,4 +1,4 @@
-data_name: 'clickbait2' #
+data_name: 'clickbait' # clickbait only - all working
 use_jit: True
 post_sel: True
 use_grad_clip: True
@@ -9,6 +9,6 @@ batch_size: 64
 init_val: 0.01
 ansatz: 'A14'
 n_qubits: 1 # number of qubits per word
-parse_type: 'height'  # unibox / height / rule
+parse_type: 'rule'  # unibox / height / rule
 n_layers: 2
 lr: 0.001

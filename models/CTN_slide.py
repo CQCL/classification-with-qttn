@@ -12,7 +12,7 @@ import pickle
 import numpy as np
 import pickle
 import optax
-from datatime import datetime
+from datetime import datetime
 
 import yaml
 
@@ -28,7 +28,7 @@ tn.set_default_backend("jax")
 
 np.random.seed(0)
 
-with open('SCTN_config.yaml', 'r') as f:
+with open('CTNs_config.yaml', 'r') as f:
     conf = yaml.safe_load(f)
 
 n_qubits = conf['n_qubits'] # number of qubits per word
@@ -38,36 +38,11 @@ if conf['post_sel']:
 else:
     box_vec = make_density_matrix
 
-# ------------------------------------- SETTINGS -------------------------------- #
-data_name = 'genome' 
-post_sel = False
-window_size = 4
-
-thr = 50
-pos_shift = False
-model = 'CTN'
-use_jit = False
-use_grad_clip = True
-use_optax_reg = True
-include_final_classification_box = True
-grad_clip = 100.0
-n_epochs = 10
-batch_size = 64
-init_val = 0.001
-ansatz = 'A14' 
-# ------------------------------------- SETTINGS -------------------------------- #
-
-parse_type = 'unibox'
-n_qubits = 1
-n_layers = 1
-lr = 0.01
-
-
 # ------------------------------- READ IN DATA ---------------------------- #
 print("Reading in data ... ")
 print("Load data")
 
-save_path = f'Data/CTN_SLIDE_{window_size}/{data_name}/'
+save_path = f'../Data/CTN_SLIDE_{conf["window_size"]}/{conf["data_name"]}/'
 
 w2i = pickle.load(file=open(f'{save_path}{"w2i"}', 'rb'))
 train_data = pickle.load(file=open(f'{save_path}{"train_data"}', 'rb'))
@@ -78,8 +53,7 @@ print("Number of train examples: ", len(train_data['labels']))
 print("Number of val examples: ", len(val_data['labels']))
 print("Number of test examples: ", len(test_data['labels']))
 # ------------------------------- READ IN DATA ----------------------------- #
-
-                
+    
 discard = not conf['post_sel']
 
 if conf['ansatz'] == 'IQP':
@@ -99,18 +73,6 @@ eval_args = {
     'contractor': tn.contractors.auto # use tensor networks if speed
 }
 
-print("Model: ", model)
-print("window size: ", window_size)
-print("Parse: ", parse_type)
-print("Number of epochs: ", n_epochs)
-print("Batch size: ", batch_size)
-print("Ansatz: ", ansatz)
-print("Number of word qubits: ", n_qubits)
-print("Number of layers: ", n_layers)
-print("Using post selection: ", post_sel)
-print("Include classification box: ", include_final_classification_box)
-print("Using gradient clipping: ", use_grad_clip)
-
 def flatten_list(li):
     return [y for x in li for y in x]
 
@@ -123,7 +85,7 @@ single_batch_vec_init = jit(vmap(word_vec_init)) # vmap over initial states in a
 def uCTN(W_params, U_params, I_params, class_params, ns):
     word_vecs = vmap(word_vec_init)(W_params)
 
-    words = [box_vec(vec, "w") for vec in word_vecs]
+    words = [box_vec(vec, n_qubits) for vec in word_vecs]
     circ = Id.tensor(*words)
 
     for n in ns:
@@ -134,9 +96,9 @@ def uCTN(W_params, U_params, I_params, class_params, ns):
             circ = apply_box(circ, U_box, i)
 
         # apply isometry
-        for i in range(n-n_qubits)[::2*n_qubits]:
+        for i in range(n // 2 // n_qubits):
             I_box = ansatz(2 * n_qubits, n_qubits, I_params)
-            circ = apply_box(circ, I_box, i)
+            circ = apply_box(circ, I_box, i * n_qubits)
 
     # apply final classification ansatz
     circ >>= ansatz(n_qubits, n_qubits, class_params)
@@ -167,9 +129,9 @@ def hCTN(W_params, U_params, I_params, class_params, ns):
             circ = apply_box(circ, U_box, i)
 
         # apply isometry
-        for i in range(n-n_qubits)[::2*n_qubits]:
+        for i in range(n // 2 // n_qubits):
             I_box = ansatz(2 * n_qubits, n_qubits, I_params[idx])
-            circ = apply_box(circ, I_box, i)
+            circ = apply_box(circ, I_box, i * n_qubits)
 
     # apply final classification ansatz
     circ >>= ansatz(n_qubits, n_qubits, class_params)
@@ -187,7 +149,7 @@ def hCTN(W_params, U_params, I_params, class_params, ns):
 
     return pred
 
-CTN = uCTN if parse_type == 'unibox' else hCTN
+CTN = uCTN if conf["parse_type"] == 'unibox' else hCTN
 vmap_contract = vmap(CTN, (0, None, None, None, None))
 
 def get_loss(params, batch_words, batch_inds, labels, ns):
@@ -204,9 +166,9 @@ val_n_grad = value_and_grad(get_loss)
 def train_step(params, opt_state, batch_words, batch_labels, batch_inds, ns):
     cost, grads = val_n_grad(params, batch_words, batch_inds, batch_labels, ns)
 
-    if use_grad_clip: 
+    if conf["use_grad_clip"]: 
         for k in grads:
-            grads[k] = jnp.clip(grads[k], -grad_clip, grad_clip)
+            grads[k] = jnp.clip(grads[k], -conf["grad_clip"], conf["grad_clip"])
 
     if conf['use_optax_reg']:
         updates, opt_state = optimizer.update(grads, opt_state, params)
@@ -241,12 +203,11 @@ def get_accs(params, batch_words, ns, counts, labels):
 def random(size):
     return jnp.array(np.random.uniform(0, conf['init_val'], size=size))
 
-# TODO do we need these conversions?
 def get_batches(words, counts, labels, batch_size):
     for s in gen_batches(len(words), batch_size):
-        word = np.array(words[s], np.int64)
-        count = np.array(counts[s], np.int64)
-        label = np.array(labels[s], np.int64)
+        word = words[s]
+        count = counts[s]
+        label = labels[s]
         yield word, count, label
 
 n_words = max(w2i.values())
@@ -260,27 +221,27 @@ if conf['use_optax_reg'] is True:
 else:
     optimizer = optax.adam(conf['lr'])
 
-n_rules = 1 << len(train_data["labels"]) + 1
+n_rules = int(np.log2(conf["window_size"])+1)
 
 word_params = random((n_words+1, word_emb_size))
 class_params = random(word_emb_size)
 
-if parse_type == 'height':
+if conf["parse_type"] == 'height':
     U_params = random((n_rules, rule_emb_size))
     I_params = random((n_rules, rule_emb_size))
-elif parse_type == 'unibox':
+elif conf["parse_type"] == 'unibox':
     U_params = random(rule_emb_size)
     I_params = random(rule_emb_size)
 else:
     raise ValueError("Parse type not recognised")
 
-no_rules = int(np.log2(window_size)+1)
+no_rules = int(np.log2(conf["window_size"])+1)
 
 params = {'words': word_params,'Us': U_params, 'Is': I_params, 'class': class_params}
 opt_state = optimizer.init(params)
 
-N = window_size * n_qubits
-ns = tuple([int(N/(1 << i)) for i in range(int(jnp.log2(window_size)))])
+N = conf["window_size"] * n_qubits
+ns = tuple([int(N/(1 << i)) for i in range(int(jnp.log2(conf["window_size"])))])
 
 val_accs = []
 test_accs = []
@@ -292,7 +253,7 @@ sum_accs = []
 
 def evaluate(data, n):
     acc = 0
-    batches = get_batches(data['words'], data['counts'], data['labels'], batch_size)
+    batches = get_batches(data['words'], data['counts'], data['labels'], conf["batch_size"])
     for batch_words, batch_counts, batch_labels in batches: 
         batch_counts = np.concatenate(([0], batch_counts))
         cum_inds = tuple(np.array([np.cumsum(batch_counts[:i+1])[-1] for i in range(len(batch_counts))], np.int64))
@@ -311,8 +272,8 @@ for epoch in range(conf['n_epochs']):
     start_time = time.time()
 
     loss = 0
-    batches = get_batches(train_data['words'], train_data['counts'], train_data['labels'], batch_size)
-    for batch_words, batch_counts, batch_labels in tqdm(batches): # this was 16 untul 30th for sm reason!!!
+    batches = get_batches(train_data['words'], train_data['counts'], train_data['labels'], conf["batch_size"])
+    for batch_words, batch_counts, batch_labels in tqdm(batches):
         batch_counts.insert(0,0)
         cum_inds = tuple(np.array([np.cumsum(batch_counts[:i+1])[-1] for i in range(len(batch_counts))], np.int64)) 
         try:
@@ -347,9 +308,9 @@ for epoch in range(conf['n_epochs']):
 
     # ------------------------------ SAVE DATA -----------------–------------ #
     timestr = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    save_path = f'../Results/{timestr}/'
-    Path(save_path).mkdir(parents=True, exist_ok=True)
+    save_path = f'../Results/CTN_slide_{conf["window_size"]}/{conf["data_name"]}/{timestr}/'
     for key, value in save_dict.items():
         full_save_path = f'{save_path}{key}'
+        Path(full_save_path).mkdir(parents=True, exist_ok=True)
         pickle.dump(obj=value, file=open(f'{full_save_path}/{key}', 'wb'))
     # ------------------------------- SAVE DATA ---------------–------------ #

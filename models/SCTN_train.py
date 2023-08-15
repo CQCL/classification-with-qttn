@@ -149,7 +149,6 @@ def train_step(params, opt_state, batch_words, batch_rules, batch_Us, batch_Is, 
 def get_accs(params, batch_words, batch_rules, batch_Us, batch_Is, labels):
     preds = get_preds(params, batch_words, batch_rules, batch_Us, batch_Is)
     acc = np.sum([np.round(pred) == np.array(label, float) for pred, label in zip(preds, labels)]) / 2
-
     return acc
 
 def random(size):
@@ -198,8 +197,8 @@ def evaluate(data, n):
         batches = get_batches(d["words"], d["rules"], d["labels"], conf['batch_size'])
         for batch_words, batch_rules, batch_labels in batches:
             batch_acc = get_accs(params, batch_words, batch_rules, Us, Is, batch_labels)
-            acc += batch_acc / n
-    return acc
+            acc += batch_acc
+    return acc / n
 
 val_acc = evaluate(val_data, n_val)
 print("Initial acc  {:0.2f}  ".format(val_acc))
@@ -245,7 +244,7 @@ for epoch in range(conf['n_epochs']):
 
     # ------------------------------ SAVE DATA -----------------–------------ #
     timestr = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    save_path = f'../Results/{timestr}/'
+    save_path = f'../Results/{conf["model"]}/{conf["data_name"]}/{conf["parse_type"]}/{timestr}/'
     Path(save_path).mkdir(parents=True, exist_ok=True)
     for key, value in save_dict.items():
         full_save_path = f'{save_path}{key}'

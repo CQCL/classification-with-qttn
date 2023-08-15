@@ -1,4 +1,6 @@
+from array import array
 from pathlib import Path
+from typing import List
 import numpy as np
 import jax.numpy as jnp
 from discopy.quantum import Id, Ket, Bra
@@ -14,6 +16,8 @@ import pickle
 import optax
 from functools import partial
 import yaml
+
+from datetime import datetime
 
 from ansatz import apply_box, make_density_matrix, make_state_vector
 from ansatz import IQPAnsatz, Ansatz9, Ansatz14
@@ -31,54 +35,34 @@ with open('CTN_config.yaml', 'r') as f:
     conf = yaml.safe_load(f)
 
 n_qubits = conf['n_qubits'] # number of qubits per word
+n_layers = conf['n_layers']
+batch_size = conf['batch_size']
+lr = conf['lr']
 
 if conf['post_sel']:
     box_vec = make_state_vector
 else:
     box_vec = make_density_matrix
+discard = not conf['post_sel']
 
-# ------------------------------------- SETTINGS -------------------------------- #
-data_name = 'genome'
-model = 'CTN'
-thr = 16
-number_of_structures = 100
-post_sel = True
-use_jit = True
-use_grad_clip = True
-use_optax_reg = True
-include_final_classification_box = True
-grad_clip = 100.0
-no_epochs = 25
-batch_size = 64
-init_val = 0.01
-ansatz = 'A14' 
-n_qubits = 1 # number of qubits per word
-# ------------------------------------- SETTINGS -------------------------------- #
+parse_type = conf['parse_type']
 
-parse_type = 'unibox' # 'height' or 'unibox'
-
-load_path = f'Data/{model}/{data_name}/'
-
+# ------------------------------- READ IN DATA ----------------------------- #
+load_path = f'../Data/CTN/{conf["data_name"]}/'
 
 w2i = pickle.load(file=open(f'{load_path}w2i', 'rb'))
 train_data = pickle.load(file=open(f'{load_path}train_data', 'rb'))
 val_data = pickle.load(file=open(f'{load_path}val_data', 'rb'))
 test_data = pickle.load(file=open(f'{load_path}test_data', 'rb'))
 
-n_train = sum([len(labels["labels"]) for labels in train_data])
+n_train = np.sum([len(t) for t in train_data["labels"]])
+n_val = np.sum([len(t) for t in val_data["labels"]])
+n_test = np.sum([len(t) for t in test_data["labels"]])
+
 print("Number of train examples: ", n_train) 
-n_val = sum([len(labels["labels"]) for labels in val_data])
 print("Number of val examples: ", n_val) 
-n_test = sum([len(labels["labels"]) for labels in test_data])
 print("Number of test examples: ", n_test)
-
 # ------------------------------- READ IN DATA ----------------------------- #
-
-n_qubits = 1
-n_layers = 1
-lr = 0.01
-
-discard = not conf['post_sel']
 
 if conf['ansatz'] == 'IQP':
     ansatz = IQPAnsatz(conf['n_layers'], discard=discard)
@@ -97,6 +81,8 @@ eval_args = {
     'contractor': tn.contractors.auto # use tensor networks if speed
 }
 
+def flatten_list(li):
+    return [y for x in li for y in x]
 
 def word_vec_init(word_params):
     circ = ansatz(dom=0, cod=n_qubits, params=word_params)
@@ -105,7 +91,7 @@ def word_vec_init(word_params):
 def uCTN(W_params, U_params, I_params, class_params, ns):
     word_vecs = vmap(word_vec_init)(W_params)
 
-    words = [box_vec(vec, "w") for vec in word_vecs]
+    words = [box_vec(vec, n_qubits) for vec in word_vecs]
     circ = Id.tensor(*words)
 
     for n in ns:
@@ -116,9 +102,9 @@ def uCTN(W_params, U_params, I_params, class_params, ns):
             circ = apply_box(circ, U_box, i)
 
         # apply isometry
-        for i in range(n-n_qubits)[::2*n_qubits]:
+        for i in range(n // 2 // n_qubits):
             I_box = ansatz(2 * n_qubits, n_qubits, I_params)
-            circ = apply_box(circ, I_box, i)
+            circ = apply_box(circ, I_box, i * n_qubits)
 
     # apply final classification ansatz
     circ >>= ansatz(n_qubits, n_qubits, class_params)
@@ -149,9 +135,9 @@ def hCTN(W_params, U_params, I_params, class_params, ns):
             circ = apply_box(circ, U_box, i)
 
         # apply isometry
-        for i in range(n-n_qubits)[::2*n_qubits]:
+        for i in range(n // 2 // n_qubits): 
             I_box = ansatz(2 * n_qubits, n_qubits, I_params[idx])
-            circ = apply_box(circ, I_box, i)
+            circ = apply_box(circ, I_box, i * n_qubits)
 
     # apply final classification ansatz
     circ >>= ansatz(n_qubits, n_qubits, class_params)
@@ -172,7 +158,6 @@ def hCTN(W_params, U_params, I_params, class_params, ns):
 CTN = uCTN if parse_type == 'unibox' else hCTN
 vmap_contract = vmap(CTN, (0, None, None, None, None))
 
-# TODO is this needed?
 def get_preds(params, batch_words, ns):
     b_params = params['words'][batch_words]
     b_Us = params['Us']
@@ -260,40 +245,23 @@ test_accs = []
 losses = []
 all_params = []
 
-n_max = thr if thr else 64
+n_max = len(train_data['words'][-1][0])
 N = n_max * n_qubits
 ns = tuple([int(N / (jnp.power(2, i))) for i in range(int(jnp.log2(n_max)))]) 
 
 def evaluate(data, n):
     acc = 0
-    for d in tqdm(data):
-        if len(d["labels"]) == 0:
-            continue
-        batches = get_batches(d["words"], d["labels"], conf['batch_size'])
-        for batch_words, batch_labels in batches:
-            batch_acc = get_accs(params, batch_words, batch_labels, ns)
-            acc += batch_acc / n
-    return acc
-
-if data_name == 'genome':
-    sum_accs = []
-    for batch_words, batch_labels in get_batches(val_data['words'], val_data['labels'], batch_size):
-        batch_words = np.array(batch_words, np.int64)
-        acc = get_accs(params, batch_words, batch_labels, ns)
-        sum_accs.append(acc)
-
-else: # grouped into 2^n width trees for batching with different length sequences
-    sum_accs = []
-    for i, (words, labels) in enumerate(zip(val_data['words'], val_data['labels'])):
+    for i, (words, labels) in enumerate(zip(data['words'], data['labels'])):
         if len(words):
             n_max = int(np.power(2, i+1))
-            ns = tuple([int(N/(jnp.power(2, i))) for i in range(int(jnp.log2(n_max)))])
-            for batch_words, batch_labels in get_batches(words, labels, batch_size):
+            N = n_max*n_qubits
+            ns = tuple([int(N/(jnp.power(2, j))) for j in range(i+1)])
+            for batch_words, batch_labels in get_batches(words, labels, conf['batch_size']):
                 batch_words = np.array(batch_words, np.int64)
-                acc = get_accs(params, batch_words, batch_labels, ns)
-                sum_accs.append(acc)
+                batch_acc = get_accs(params, batch_words, batch_labels, ns)
+                acc += batch_acc / n
+    return acc 
 
-val_acc = np.sum(sum_accs) / np.sum([len(labels) for labels in val_data["labels"]])
 val_acc = evaluate(val_data, n_val)
 print("Initial acc  {:0.2f}  ".format(val_acc))
 val_accs.append(val_acc)
@@ -302,96 +270,46 @@ for epoch in range(conf['n_epochs']):
 
     start_time = time.time()
 
-    if data_name == 'genome':
-        # calc cost and update params
-        sum_loss = []
-        for batch_words, batch_labels in tqdm(get_batches(train_data['words'], train_data['labels'], batch_size)):
-            batch_words = np.array(batch_words, np.int64)
-            loss, params, opt_state = train_step(params, opt_state, batch_words, batch_labels, ns)
-            sum_loss.append(loss)
-    
-    else:
-        # calc cost and update params
-        sum_loss = []
-        for i, (words, labels) in enumerate(zip(train_data['words'], train_data['labels'])):
-            if len(words):
-                n_max = int(np.power(2, i+1))
-                N = n_max*n_qubits
-                ns = tuple([int(N/(jnp.power(2, i))) for i in range(int(jnp.log2(n_max)))])
-                for batch_words, batch_labels in get_batches(words, labels, batch_size):
-                    batch_words = np.array(batch_words, np.int64)
-                    loss, params, opt_state = train_step(params, opt_state, batch_words, batch_labels, ns)
-                    sum_loss.append(loss)
+    # calc cost and update params
+    loss = 0
+    for i, (words, labels) in enumerate(zip(train_data['words'], train_data['labels'])):
+        if len(words):
+            n_max = int(np.power(2, i+1))
+            N = n_max*n_qubits
+            ns = tuple([int(N/(jnp.power(2, j))) for j in range(i+1)])
+            for batch_words, batch_labels in get_batches(words, labels, batch_size):
+                batch_words = np.array(batch_words, np.int64)
+                cost, params, opt_state = train_step(params, opt_state, batch_words, batch_labels, ns)
+                loss += cost / n_train
 
-    if data_name == 'genome':
-        sum_accs = []
-        for batch_words, batch_labels in get_batches(val_data['words'], val_data['labels'], batch_size):
-            batch_words = np.array(batch_words, np.int64)
-            acc = get_accs(params, batch_words, batch_labels, ns)
-            sum_accs.append(acc)
-
-    else:
-        sum_accs = []
-        for i, (words, labels) in enumerate(zip(val_data['words'], val_data['labels'])):
-            if len(words):
-                n_max = int(np.power(2, i+1))
-                N = n_max*n_qubits
-                ns = tuple([int(N/(jnp.power(2, i))) for i in range(int(jnp.log2(n_max)))])
-                for batch_words, batch_labels in get_batches(words, labels, batch_size):
-                    batch_words = np.array(batch_words, np.int64)
-                    acc = get_accs(params, batch_words, batch_labels, ns)
-                    sum_accs.append(acc)
-        
-    val_acc = np.sum(sum_accs) / np.sum([len(labels) for labels in val_data["labels"]])
-    loss = np.sum(sum_loss)/ np.sum([len(labels) for labels in train_data["labels"]])
-    epoch_time = time.time() - start_time
-    print("Epoch {} in {:0.2f} sec".format(epoch, epoch_time))
-    print("Loss  {:0.2f}  ".format(loss))
-    print("Acc  {:0.2f}  ".format(val_acc))
-    val_accs.append(val_acc)
     losses.append(loss)
     all_params.append(params)
 
-    if data_name == 'genome':
-        sum_accs = []
-        ns = tuple([int(N/(jnp.power(2, i))) for i in range(int(jnp.log2(n_max)))])
-        for batch_words, batch_labels in get_batches(test_data['words'], test_data['labels'], batch_size):
-            batch_words = np.array(batch_words, np.int64)
-            acc = get_accs(params, batch_words, batch_labels, ns)
-            sum_accs.append(acc)
+    print("Loss  {:0.2f}".format(loss))
+    val_acc = evaluate(val_data, n_val)
+    print("Val Acc  {:0.2f}".format(val_acc))
+    val_accs.append(val_acc)
 
-    else:
-        sum_accs = []
-        for i, (words, labels) in enumerate(zip(test_data['words'], test_data['labels'])):
-            if len(words):
-                n_max = int(np.power(2, i+1))
-                N = n_max*n_qubits
-                ns = tuple([int(N/(jnp.power(2, i))) for i in range(int(jnp.log2(n_max)))])
-                for batch_words, batch_labels in get_batches(words, labels, batch_size):
-                    batch_words = np.array(batch_words, np.int64)
-                    acc = get_accs(params, batch_words, batch_labels, ns)
-                    sum_accs.append(acc)
-
-    test_acc = np.sum(sum_accs) / np.sum([len([l for l in labels]) for labels in test_data["labels"]])
+    test_acc = evaluate(test_data, n_test)
+    print("Test Acc: ", test_acc)
     test_accs.append(test_acc)
-    print("Test set accuracy: ", test_acc)
 
+    epoch_time = time.time() - start_time
+    print("Epoch {} in {:0.2f} sec".format(epoch, epoch_time))
 
-# ------------------------------- SAVE DATA ---------------–------------ #
+    save_dict = {
+        'params_dict': all_params,
+        'opt_state': opt_state,
+        'test_accs': test_accs,
+        'val_accs': val_accs,
+        'losses': losses,
+        'w2i': w2i
+    }
 
-save_dict = {
-    'params_dict': all_params,
-    'opt_state': opt_state,
-    'test_accs': test_accs,
-    'val_accs': val_accs,
-    'losses': losses,
-    'w2i': w2i
-}
-
-# ------------------------------ SAVE DATA -----------------–------------ #
-
-save_path = f'../Results'
-Path(save_path).mkdir(parents=True, exist_ok=True)
-for key, value in conf.items():
-    full_save_path = f'{save_path}{key}'
-    pickle.dump(obj=value, file=open(f'{full_save_path}/{key}', 'wb'))
+    # ------------------------------ SAVE DATA -----------------–------------ #
+    timestr = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    save_path = f'../Results/CTN/{conf["data_name"]}/{conf["parse_type"]}/{timestr}/'
+    for key, value in conf.items():
+        full_save_path = f'{save_path}{key}'
+        Path(full_save_path).mkdir(parents=True, exist_ok=True)
+        pickle.dump(obj=value, file=open(f'{full_save_path}/{key}', 'wb'))

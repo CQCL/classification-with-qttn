@@ -1,0 +1,15 @@
+window_size: 8
+data_name: 'genome' # rotten_tomatoes / Protein-binding / IMDb - all works 
+use_jit: True
+post_sel: True
+use_grad_clip: True
+use_optax_reg: True
+grad_clip: 100.0
+n_epochs: 25
+batch_size: 64
+init_val: 0.01
+ansatz: 'A14'
+n_qubits: 1 # number of qubits per word
+parse_type: 'height'  # unibox / height
+n_layers: 1 
+lr: 0.001

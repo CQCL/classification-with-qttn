@@ -1,4 +1,3 @@
-from curses import window
 import numpy as np
 from pathlib import Path
 import pickle
@@ -56,6 +55,23 @@ def compute_w2i(sentences, min_freq, lemmatise=False, max_vocab=None):
         else:
             return w2i
 
+def partition_sents(sents):
+    split_sents = []
+    counts = []
+    for sent in sents:
+        count = 0
+        temp = []
+        if len(sent) <= window_size:
+            temp.append(np.concatenate(([w2i[s] for s in sent], pad_idx*np.ones(window_size-len(sent)))))
+            count+=1
+        else:
+            for i in range(len(sent)-window_size):
+                temp.append(np.array([w2i[s] for s in sent[i:i+window_size]]))
+                count+=1
+        split_sents.append(temp)
+        counts.append(count)
+    return split_sents, counts
+
 data_name = 'gen'
 print("Data: ", data_name)
 
@@ -72,15 +88,6 @@ if data_name == 'rotten-tomatoes':
 
     with open('Data/neg.txt') as f:
         neg_lines = [line.strip() for line in f if line.strip()]
-    
-    pos_sents = tokenize(pos_lines)
-    neg_sents = tokenize(neg_lines)
-
-    sents = np.concatenate((pos_sents, neg_sents))
-    labels = np.concatenate(([[1,0]]*len(pos_sents),[[0,1]]*len(neg_sents)))
-
-    min_freq = 1
-    w2i = compute_w2i(sents, min_freq)
 
 elif data_name == 'IMDb':
     
@@ -90,15 +97,6 @@ elif data_name == 'IMDb':
 
     pos_lines = [sent for (sent,label) in zip(sents, labels) if label == 'positive']
     neg_lines = [sent for (sent,label) in zip(sents, labels) if label == 'negative' ]
-
-    pos_sents = tokenize(pos_lines)
-    neg_sents = tokenize(neg_lines)
-
-    sents = np.concatenate((pos_sents, neg_sents))
-    labels = np.concatenate(([[1,0]]*len(pos_sents),[[0,1]]*len(neg_sents)))
-    
-    min_freq = 1
-    w2i = compute_w2i(sents, min_freq)
 
 elif data_name == 'protein-binding':
 
@@ -116,15 +114,13 @@ elif data_name == 'protein-binding':
         elif label == '1':
             neg_sents.append([l for l in line])
 
-    pos_sents = [p[:10] for p in pos_sents]
-    neg_sents = [p[:10] for p in neg_sents]
+pos_sents = tokenize(pos_lines)
+neg_sents = tokenize(neg_lines)
+sents = np.concatenate((pos_sents, neg_sents))
+labels = np.concatenate(([[1,0]]*len(pos_sents),[[0,1]]*len(neg_sents)))
 
-    sents = np.concatenate((pos_sents, neg_sents))
-    labels = np.concatenate(([[1,0]]*len(pos_sents),[[0,1]]*len(neg_sents)))
-    min_freq = 1
-    w2i = compute_w2i(sents, min_freq)
-
-# transfer to w2i 
+min_freq = 1
+w2i = compute_w2i(sents, min_freq)
 window_size = 4
 pad_idx = max(w2i.values())+1
 
@@ -132,50 +128,9 @@ pad_idx = max(w2i.values())+1
 train_sents, val_sents, train_labels, val_labels = train_test_split(sents, labels, test_size=0.1, random_state=0, shuffle=True)
 train_sents, test_sents, train_labels, test_labels = train_test_split(train_sents, train_labels, test_size=0.1111, random_state=0, shuffle=True)
 
-train_split_sents = []
-train_counts = []
-for sent in train_sents:
-    count = 0
-    temp = []
-    if len(sent) <= window_size:
-        temp.append(np.concatenate(([w2i[s] for s in sent], pad_idx*np.ones(window_size-len(sent)))))
-        count+=1
-    else:
-        for i in range(len(sent)-window_size):
-            temp.append(np.array([w2i[s] for s in sent[i:i+window_size]]))
-            count+=1
-    train_split_sents.append(temp)
-    train_counts.append(count)
-
-val_split_sents = []
-val_counts = []
-for sent in val_sents:
-    count = 0
-    temp = []
-    if len(sent) <= window_size:
-        temp.append(np.concatenate(([w2i[s] for s in sent], pad_idx*np.ones(window_size-len(sent)))))
-        count+=1
-    else:
-        for i in range(len(sent)-window_size):
-            temp.append(np.array([w2i[s] for s in sent[i:i+window_size]]))
-            count+=1
-    val_split_sents.append(temp)
-    val_counts.append(count)
-
-test_split_sents = []
-test_counts = []
-for sent in test_sents:
-    count = 0
-    temp = []
-    if len(sent) <= window_size:
-        temp.append(np.concatenate(([w2i[s] for s in sent], pad_idx*np.ones(window_size-len(sent)))))
-        count+=1
-    else:
-        for i in range(len(sent)-window_size):
-            temp.append(np.array([w2i[s] for s in sent[i:i+window_size]]))
-            count+=1
-    test_split_sents.append(temp)
-    test_counts.append(count)
+train_split_sents, train_counts = partition_sents(train_sents)
+val_split_sents, val_counts = partition_sents(val_sents)
+test_split_sents, test_counts = partition_sents(test_sents)
 
 train_data = {"words": train_split_sents, "counts": train_counts, "labels": train_labels}
 val_data = {"words": val_split_sents, "counts": val_counts, "labels": val_labels}

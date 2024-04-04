@@ -9,13 +9,29 @@ from sklearn.model_selection import train_test_split
 
 data_name = 'clickbait'
 include_SCTN = False # only recommended for clickbait data with cut-off number of structures and thr defined 
-number_of_structures = 100 # cut-off most common syntactic structures to keep
+number_of_structures = 50 # cut-off most common syntactic structures to keep
 thr = 64 # cut-off sentence length
-reduce_train = False
-if data_name == 'clickbait':
+reduce_train = True
+if data_name == 'clickbait': # suggested values (used in cited experiments)
     reduce_val = 2031
 else:
     reduce_val = 2352
+
+def pad_left(v, n, pad_value):
+    """ pad vector v on the right with n values of pad_value """
+    if n == 0:
+        return v
+    if len(v) == 0:
+        return np.array([pad_value] * n)
+    return np.concatenate(([pad_value] * n, v))
+
+def pad_right(v, n, pad_value):
+    """ pad vector v on the right with n values of pad_value """
+    if n == 0:
+        return v
+    if len(v) == 0:
+        return np.array([pad_value] * n)
+    return np.concatenate((v, [pad_value] * n))
 
 def pad_CTN(txt, labels, max_N, w2i, pad_idx):
     assert math.log(max_N, 2).is_integer(), "Please provide max_N = 2^n"
@@ -32,8 +48,8 @@ def pad_CTN(txt, labels, max_N, w2i, pad_idx):
                 n_pad = lens[i] - len(words)
                 left = n_pad // 2
                 right = n_pad - left
-                left_pad = np.ones(left)*pad_idx
-                right_pad = np.ones(right)*pad_idx
+                left_pad = np.ones(left, dtype=int)*pad_idx
+                right_pad = np.ones(right, dtype=int)*pad_idx
                 temp.append(np.concatenate((left_pad, words, right_pad)))
                 temp_labels.append(label)
         ordered_pads.append(temp)
@@ -45,14 +61,15 @@ def SCTN_process(input_trees, w2i, r2i):
     batch_rules = []
     batch_units = []
     batch_isoms = []
+
     for tree in input_trees:
         tree_words = [w2i[box.name] for box in tree.foliation()[0].boxes]
-        n_words = len(tree_words)
+        idxs = len(tree_words)
         tree_rules = []
-        idxs = n_words
         posUs = []
         posIs = []
         for layer in tree.foliation()[1:]:
+
             for box, offset in zip(layer.boxes, layer.offsets):
                 if len(box.dom) == 1: # type-raising
                     continue
@@ -61,7 +78,7 @@ def SCTN_process(input_trees, w2i, r2i):
                         tree_rules.append(0)
                     else:
                         tree_rules.append(r2i[box.name])
-                    posIs.append((offset))
+                    posIs.append((offset)) # apply isometries at syntactic contractions
                     temp = []
                     if offset-1 >= 0:
                         temp.append(offset-1)
@@ -225,24 +242,99 @@ def reorder_split_inds(ordered_inds, split_inds, split_labels):
         reordered_labels.append(temp_labels)
     return reordered_inds, reordered_labels
 
+def get_data_balance(data_labels, print_data):
+    n_pos = np.sum([len([l for l in labels if np.allclose(l,[1,0])]) for labels in data_labels])
+    n_neg = np.sum([len([l for l in labels if np.allclose(l,[0,1])]) for labels in data_labels])
+    if print_data is not None:
+        print(f'{print_data} pos', n_pos)
+        print(f'{print_data} neg', n_neg)
+    return n_pos, n_neg
+
+def extract_idx_data(data, idxs):
+    return [data[i] for i in idxs]
+
+def extract_data_points(sents, trees, labels, idxs):
+    return extract_idx_data(sents, idxs), extract_idx_data(trees, idxs), extract_idx_data(labels, idxs)
+
+def sort_by_idx_after_SCTN_grouping(sents, trees, labels, idxs):
+    idxs_sents = [sents[t] for t in flatten_list(idxs)]
+    idxs_trees = [trees[t] for t in flatten_list(idxs)]
+    idxs_labels = [sents[t] for t in flatten_list(labels)]
+    return idxs_sents, idxs_trees, idxs_labels
+
+def save_data(model, save_path, train_dict, val_dict, test_dict, w2i, r2i):
+    if include_SCTN:
+        if reduce_train:
+            save_path = f'Data/{model}/{save_name}/{thr}_{number_of_structures}_REDUCED_{reduce_val}/'
+        else:
+            save_path = f'Data/{model}/{save_name}/{thr}_{number_of_structures}/'
+    else:
+        if reduce_train:
+            save_path = f'Data/{model}/{save_name}/REDUCED_{reduce_val}/'
+        else:
+            save_path = f'Data/{model}/{save_name}/'
+    if model in ['SCTN', 'STN']:
+        save_path += parse_type + '/'
+    Path(save_path).mkdir(parents=True, exist_ok=True)
+    pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
+    pickle.dump(obj=r2i, file=open(f'{save_path}{"r2i"}', 'wb'))
+    pickle.dump(obj=train_dict, file=open(f'{save_path}{"train_data"}', 'wb'))
+    pickle.dump(obj=val_dict, file=open(f'{save_path}{"val_data"}', 'wb'))
+    pickle.dump(obj=test_dict, file=open(f'{save_path}{"test_data"}', 'wb'))
+    print(f'Saving {model} data at: {save_path}')
+
 # --------------------- READ IN parsed data for processing--------------- #
 print("Loading parsed data.")
-save_path = f'Data/{data_name}_trees/'
-Path(save_path).mkdir(parents=True, exist_ok=True)
+save_path = f'/Users/caz/Documents/bt_cleanup/Data/{data_name}_trees/'
 w2i = pickle.load(file=open(f'{save_path}{"w2i"}', 'rb'))
 data = pickle.load(file=open(f'{save_path}{"parsed_data"}', 'rb'))
+sents = [data["sents"][i] for i in range(50)]
+trees = [data["trees"][i] for i in range(50)]
+labels = [data["labels"][i] for i in range(50)]
 sents, trees, labels = data["sents"], data["trees"], data["labels"]
 # --------------------- READ IN parsed data for processing--------------- #
 
-for parse_type in ['height']: # ['unibox', 'rule', 'height']:
+print("Data: ", data_name)
+print("Threshold length: ", thr)
+if include_SCTN: # must group similar structures and rebalancing data for batching and fair testing 
+    
+    print("Keeping ", number_of_structures, " syntactic forms.")
+    
+    print("Grouping structures ...")
+    ordered_inds = group_trees(trees)
+    ordered_inds = ordered_inds[:number_of_structures]
+    ordered_labels = [[labels[i] for i in inds] for inds in ordered_inds]
 
-    print("Data: ", data_name)
-    print("Parse: ", parse_type)
-    print("Threshold length: ", thr)
-    if include_SCTN:
-        print("Keeping ", number_of_structures, " syntactic forms.")
+    print("Rebalancing... ")
+    n_pos, n_neg = get_data_balance(ordered_labels, None)
+    count_thr = min(n_pos, n_neg)
+    bal_inds, bal_labels  = rebalance(ordered_inds, ordered_labels, count_thr)
 
-    assert parse_type in ['unibox', 'height', 'rule'] # alter code for stairs->rule as is in tree pre-processing
+    print("Number of tress remaining: ", len(flatten_list(bal_inds)))
+    print("Train/dev/test ... ")
+    train_inds, val_inds, train_labels, val_labels = train_test_split(flatten_list(bal_inds), flatten_list(bal_labels), test_size=0.1, random_state=0, shuffle=True)
+    train_inds, test_inds, train_labels, test_labels = train_test_split(train_inds, train_labels, test_size=0.1111, random_state=0, shuffle=True)
+
+    train_inds, train_labels = reorder_split_inds(ordered_inds, train_inds, train_labels)
+    val_inds, val_labels = reorder_split_inds(ordered_inds, val_inds, val_labels)
+    test_inds, test_labels = reorder_split_inds(ordered_inds, test_inds, test_labels)
+
+    # print test
+    n_pos, n_neg = get_data_balance(train_labels, 'Train')
+    n_pos, n_neg = get_data_balance(val_labels, 'Validation')
+    n_pos, n_neg = get_data_balance(test_labels, 'Test')
+
+    if reduce_train:
+        print("Rebalancing TRAIN... ")
+        train_inds, train_labels  = rebalance(train_inds, train_labels, int(reduce_val/2))
+        n_pos, n_neg = get_data_balance(train_labels, 'train')
+
+    # ----------------------------------------- SCTN saving ------------------------------------ #
+    ordered_train_data = [[trees[t] for t in inds] for inds in train_inds]
+    ordered_val_data = [[trees[t] for t in inds] for inds in val_inds]
+    ordered_test_data = [[trees[t] for t in inds] for inds in test_inds]
+
+for parse_type in ['unibox']: # , 'rule', 'height']:
 
     # --------------------- Grouping shared structure ----------------------- #
     if thr is not None:
@@ -251,7 +343,6 @@ for parse_type in ['height']: # ['unibox', 'rule', 'height']:
     
     if thr == 64:
         save_name = f'{data_name}_full'
-        print(save_name)
     else:
         save_name = data_name
 
@@ -270,53 +361,6 @@ for parse_type in ['height']: # ['unibox', 'rule', 'height']:
 
     if include_SCTN:
 
-        print("Grouping structures ...")
-        ordered_inds = group_trees(trees)
-        ordered_inds = ordered_inds[:number_of_structures]
-        ordered_labels = [[labels[i] for i in inds] for inds in ordered_inds]
-
-        print("Rebalancing... ")
-        n_pos = np.sum([len([l for l in labels if np.allclose(l,[1,0])]) for labels in ordered_labels])
-        n_neg = np.sum([len([l for l in labels if np.allclose(l,[0,1])]) for labels in ordered_labels])
-        count_thr = min(n_pos, n_neg)
-        bal_inds, bal_labels  = rebalance(ordered_inds, ordered_labels, count_thr)
-
-        print("Number of tress remaining: ", len(flatten_list(bal_inds)))
-        print("Train/dev/test ... ")
-        train_inds, val_inds, train_labels, val_labels = train_test_split(flatten_list(bal_inds), flatten_list(bal_labels), test_size=0.1, random_state=0, shuffle=True)
-        train_inds, test_inds, train_labels, test_labels = train_test_split(train_inds, train_labels, test_size=0.1111, random_state=0, shuffle=True)
-
-        train_inds, train_labels = reorder_split_inds(ordered_inds, train_inds, train_labels)
-        val_inds, val_labels = reorder_split_inds(ordered_inds, val_inds, val_labels)
-        test_inds, test_labels = reorder_split_inds(ordered_inds, test_inds, test_labels)
-
-        # print test
-        n_pos = np.sum([len([l for l in labels if np.allclose(l,[1,0])]) for labels in train_labels])
-        n_neg = np.sum([len([l for l in labels if np.allclose(l,[0,1])]) for labels in train_labels])
-        print("TRAIN pos: ", n_pos)
-        print("TRAIN neg: ", n_neg) 
-        n_pos = np.sum([len([l for l in labels if np.allclose(l,[1,0])]) for labels in val_labels])
-        n_neg = np.sum([len([l for l in labels if np.allclose(l,[0,1])]) for labels in val_labels])
-        print("VAL pos: ", n_pos)
-        print("VAL neg: ", n_neg) 
-        n_pos = np.sum([len([l for l in labels if np.allclose(l,[1,0])]) for labels in test_labels])
-        n_neg = np.sum([len([l for l in labels if np.allclose(l,[0,1])]) for labels in test_labels])
-        print("TEST pos: ", n_pos)
-        print("TEST neg: ", n_neg) 
-
-        if reduce_train:
-            print("Rebalancing TRAIN... ")
-            train_inds, train_labels  = rebalance(train_inds, train_labels, int(reduce_val/2))
-            n_pos = np.sum([len([l for l in labels if np.allclose(l,[1,0])]) for labels in train_labels])
-            n_neg = np.sum([len([l for l in labels if np.allclose(l,[0,1])]) for labels in train_labels])
-            print("TRAIN pos reduced: ", n_pos)
-            print("TRAIN neg reduced: ", n_neg) 
-
-        # ----------------------------------------- SCTN saving ------------------------------------ #
-        ordered_train_data = [[trees[t] for t in inds] for inds in train_inds]
-        ordered_val_data = [[trees[t] for t in inds] for inds in val_inds]
-        ordered_test_data = [[trees[t] for t in inds] for inds in test_inds]
-
         if parse_type == 'height':
             ordered_train_data = [[height_tree(tree) for tree in trees] for trees in ordered_train_data]
             ordered_val_data = [[height_tree(tree) for tree in trees] for trees in ordered_val_data]
@@ -329,28 +373,15 @@ for parse_type in ['height']: # ['unibox', 'rule', 'height']:
         print("SCTN Number of train examples: ", np.sum([len(data["labels"]) for data in train_dict_SCTN]))
         print("SCTN Number of val examples: ", np.sum([len(data["labels"]) for data in val_dict_SCTN]))
         print("SCTN Number of test examples: ", np.sum([len(data["labels"]) for data in test_dict_SCTN]))
-        print("Saving SCTN data")
-        if reduce_train:
-            save_path = f'Data/SCTN/{save_name}/{thr}_{number_of_structures}_REDUCED_{reduce_val}/{parse_type}/'
-        else:
-            save_path = f'Data/SCTN/{save_name}/{thr}_{number_of_structures}/{parse_type}/'
-        Path(save_path).mkdir(parents=True, exist_ok=True)
-        pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
-        pickle.dump(obj=r2i, file=open(f'{save_path}{"r2i"}', 'wb'))
-        pickle.dump(obj=train_dict_SCTN, file=open(f'{save_path}{"train_data"}', 'wb'))
-        pickle.dump(obj=val_dict_SCTN, file=open(f'{save_path}{"val_data"}', 'wb'))
-        pickle.dump(obj=test_dict_SCTN, file=open(f'{save_path}{"test_data"}', 'wb'))
+        save_data('SCTN', save_path, train_dict_SCTN, val_dict_SCTN, test_dict_SCTN, w2i, r2i)
         # ----------------------------------------- SCTN saving ------------------------------------ #
 
         # ----------------------------------------- PATH/TTN saving ------------------------------------ #
-        train_sents = [sents[t] for t in flatten_list(train_inds)]
-        val_sents = [sents[t] for t in flatten_list(val_inds)]
-        test_sents = [sents[t] for t in flatten_list(test_inds)]
-        train_trees = [trees[t] for t in flatten_list(train_inds)]
-        val_trees = [trees[t] for t in flatten_list(val_inds)]
-        test_trees = [trees[t] for t in flatten_list(test_inds)]
-
-        if parse_type == 'height':
+        train_sents, train_trees, train_labels = sort_by_idx_after_SCTN_grouping(sents, trees, labels, train_inds)
+        val_sents, val_trees, val_labels = sort_by_idx_after_SCTN_grouping(sents, trees, labels, val_inds)
+        test_sents, test_trees, test_labels = sort_by_idx_after_SCTN_grouping(sents, trees, labels, test_inds)
+        
+        if parse_type == 'height': # dont reprocess !
             train_trees = flatten_list(ordered_train_data)
             val_trees = flatten_list(ordered_val_data)
             test_trees = flatten_list(ordered_test_data) 
@@ -370,11 +401,8 @@ for parse_type in ['height']: # ['unibox', 'rule', 'height']:
         # test_trees[t3].draw()
         # ---------------------------- sanity check ------------------------ # 
 
-        train_labels = [labels[t] for t in flatten_list(train_inds)]
-        val_labels = [labels[t] for t in flatten_list(val_inds)]
-        test_labels = [labels[t] for t in flatten_list(test_inds)]
-
-    else: 
+    else: # don't have to deal with grouping structures and rebalancing data 
+        
         print("Train/dev/test ... ")
         train_inds, val_inds, train_labels, val_labels = train_test_split(list(range(len(sents))), labels, test_size=0.1, random_state=0, shuffle=True)
         train_inds, test_inds, train_labels, test_labels = train_test_split(train_inds, train_labels, test_size=0.1111, random_state=0, shuffle=True)
@@ -385,15 +413,9 @@ for parse_type in ['height']: # ['unibox', 'rule', 'height']:
             print("TRAIN pos reduced: ", len(train_inds))
             print("TRAIN neg reduced: ", len(train_labels)) 
 
-        train_sents = [sents[t] for t in train_inds]
-        val_sents = [sents[t] for t in val_inds]
-        test_sents = [sents[t] for t in test_inds]
-        train_trees = [trees[t] for t in train_inds]
-        val_trees = [trees[t] for t in val_inds]
-        test_trees = [trees[t] for t in test_inds]
-        train_labels = [labels[t] for t in train_inds]
-        val_labels = [labels[t] for t in val_inds]
-        test_labels = [labels[t] for t in test_inds]
+        train_sents, train_trees, train_labels = extract_data_points(sents, trees, labels, train_inds)
+        val_sents, val_trees, val_labels = extract_data_points(sents, trees, labels, val_inds)
+        test_sents, test_trees, test_labels = extract_data_points(sents, trees, labels, test_inds)
 
         if parse_type == 'height':
             train_trees = [height_tree(tree) for tree in train_trees]
@@ -407,6 +429,10 @@ for parse_type in ['height']: # ['unibox', 'rule', 'height']:
     train_dict = {"words": train_words, "rules": train_rules, "offsets": train_offsets, "labels": train_labels}
     val_dict = {"words": val_words, "rules": val_rules, "offsets": val_offsets, "labels": val_labels}
     test_dict = {"words": test_words, "rules": test_rules, "offsets": test_offsets, "labels": test_labels}
+    print("STN Train examples: ", len(train_dict['words']))
+    print("STN Validation examples: ", len(val_dict['words']))
+    print("STN Test examples: ", len(test_dict['words']))
+    save_data('STN', save_path, train_dict, val_dict, test_dict, w2i, r2i)
 
     if parse_type == 'unibox' or parse_type == 'height':
         train_trees_stairs, train_labels = get_diagrams_PTN(train_sents, train_labels)
@@ -421,89 +447,23 @@ for parse_type in ['height']: # ['unibox', 'rule', 'height']:
         print("PATH Train examples: ", len(train_dict_stairs['words']))
         print("PATH Validation examples: ", len(val_dict_stairs['words']))
         print("PATH Test examples: ", len(test_dict_stairs['words']))
-
-    print("sTTN Train examples: ", len(train_dict['words']))
-    print("sTTN Validation examples: ", len(val_dict['words']))
-    print("sTTN Test examples: ", len(test_dict['words']))
-
-    print("Saving PATH / TREE reduced data")
-    if include_SCTN:
-        if reduce_train:
-            save_path = f'Data/STN/{save_name}/{thr}_{number_of_structures}_REDUCED_{reduce_val}/{parse_type}/'
-        else:
-            save_path = f'Data/STN/{save_name}/{thr}_{number_of_structures}/{parse_type}/'
-    else:
-        if reduce_train:
-            save_path = f'Data/STN/{save_name}/REDUCED_{reduce_val}/{parse_type}/'
-        else:
-            save_path = f'Data/STN/{save_name}/{parse_type}/'
-    Path(save_path).mkdir(parents=True, exist_ok=True)
-    pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
-    pickle.dump(obj=r2i, file=open(f'{save_path}{"r2i"}', 'wb'))
-    pickle.dump(obj=train_dict, file=open(f'{save_path}{"train_data"}', 'wb'))
-    pickle.dump(obj=val_dict, file=open(f'{save_path}{"val_data"}', 'wb'))
-    pickle.dump(obj=test_dict, file=open(f'{save_path}{"test_data"}', 'wb'))
-    if parse_type == 'unibox' or parse_type == 'height':
-        if include_SCTN:
-            if reduce_train:
-                save_path = f'Data/PTN/{save_name}/{thr}_{number_of_structures}_REDUCED_{reduce_val}/{parse_type}/'
-            else:
-                save_path = f'Data/PTN/{save_name}/{thr}_{number_of_structures}/{parse_type}/'
-        else:
-            if reduce_train:
-                save_path = f'Data/PTN/{save_name}/REDUCED_{reduce_val}/{parse_type}/'
-            else:
-                save_path = f'Data/PTN/{save_name}/{parse_type}/'
-        Path(save_path).mkdir(parents=True, exist_ok=True)
-        pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
-        pickle.dump(obj=r2i, file=open(f'{save_path}{"r2i"}', 'wb'))
-        pickle.dump(obj=train_dict_stairs, file=open(f'{save_path}{"train_data"}', 'wb'))
-        pickle.dump(obj=val_dict_stairs, file=open(f'{save_path}{"val_data"}', 'wb'))
-        pickle.dump(obj=test_dict_stairs, file=open(f'{save_path}{"test_data"}', 'wb'))
+        save_data('PTN', save_path, train_dict_stairs, val_dict_stairs, test_dict_stairs, w2i, r2i)
     # ----------------------------------------- PTN / TTTN saving ------------------------------------ #
 
-    # ----------------------------------------- MERA / bTREE saving ------------------------------------ #
-    pad_idx = max(w2i.values())+1
-    train_words, train_labels = pad_CTN(train_sents, train_labels, thr, w2i, pad_idx)
-    val_words, val_labels = pad_CTN(val_sents, val_labels, thr, w2i, pad_idx)
-    test_words, test_labels = pad_CTN(test_sents, test_labels, thr, w2i, pad_idx)
-    train_dict_CTN = {"words": train_words, "labels": train_labels}
-    val_dict_CTN = {"words": val_words, "labels": val_labels}
-    test_dict_CTN = {"words": test_words, "labels": test_labels}
-
-    print("MERA Train examples: ", np.sum([len(data) for data in train_dict_CTN["words"]]))
-    print("MERA Validation examples: ", np.sum([len(data) for data in val_dict_CTN["words"]]))
-    print("MERA Test examples: ", np.sum([len(data) for data in test_dict_CTN["words"]]))
-    if include_SCTN:
-        if reduce_train:
-            save_path = f'Data/CTN/{save_name}/{thr}_{number_of_structures}_REDUCED_{reduce_val}/{parse_type}/'
-        else:
-            save_path = f'Data/CTN/{save_name}/{thr}_{number_of_structures}/{parse_type}/'
-    else:
-        if reduce_train:
-            save_path = f'Data/CTN/{save_name}/REDUCED_{reduce_val}/{parse_type}/'
-        else:
-            save_path = f'Data/CTN/{save_name}/{parse_type}/'
-    Path(save_path).mkdir(parents=True, exist_ok=True)
-    pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
-    pickle.dump(obj=r2i, file=open(f'{save_path}{"r2i"}', 'wb'))
-    pickle.dump(obj=train_dict_CTN, file=open(f'{save_path}{"train_data"}', 'wb'))
-    pickle.dump(obj=val_dict_CTN, file=open(f'{save_path}{"val_data"}', 'wb'))
-    pickle.dump(obj=test_dict_CTN, file=open(f'{save_path}{"test_data"}', 'wb'))
-    if include_SCTN:
-        if reduce_train:
-            save_path = f'Data/TTN/{save_name}/{thr}_{number_of_structures}_REDUCED_{reduce_val}/{parse_type}/'
-        else:
-            save_path = f'Data/TTN/{save_name}/{thr}_{number_of_structures}/{parse_type}/'
-    else:
-        if reduce_train:
-            save_path = f'Data/TTN/{save_name}/REDUCED_{reduce_val}/{parse_type}/'
-        else:
-            save_path = f'Data/TTN/{save_name}/{parse_type}/'
-    Path(save_path).mkdir(parents=True, exist_ok=True)
-    pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
-    pickle.dump(obj=r2i, file=open(f'{save_path}{"r2i"}', 'wb'))
-    pickle.dump(obj=train_dict_CTN, file=open(f'{save_path}{"train_data"}', 'wb'))
-    pickle.dump(obj=val_dict_CTN, file=open(f'{save_path}{"val_data"}', 'wb'))
-    pickle.dump(obj=test_dict_CTN, file=open(f'{save_path}{"test_data"}', 'wb'))
-    # ----------------------------------------- MERA / bTREE saving ------------------------------------ #
+# ----------------------------------------- MERA / bTREE saving ------------------------------------ #
+pad_idx = max(w2i.values())+1
+train_words, train_labels = pad_CTN(train_sents, train_labels, thr, w2i, pad_idx)
+val_words, val_labels = pad_CTN(val_sents, val_labels, thr, w2i, pad_idx)
+test_words, test_labels = pad_CTN(test_sents, test_labels, thr, w2i, pad_idx)
+train_dict_CTN = {"words": train_words, "labels": train_labels}
+val_dict_CTN = {"words": val_words, "labels": val_labels}
+test_dict_CTN = {"words": test_words, "labels": test_labels}
+print("MERA Train examples: ", np.sum([len(data) for data in train_dict_CTN["words"]]))
+print(train_dict_CTN["labels"])
+print("MERA Validation examples: ", np.sum([len(data) for data in val_dict_CTN["words"]]))
+print("MERA Test examples: ", np.sum([len(data) for data in test_dict_CTN["words"]]))
+save_data('CTN', save_path, train_dict_CTN, val_dict_CTN, test_dict_CTN, w2i, r2i)
+# TTN - also save prepadded (to 2^n) examples 
+# this data must then be processed in TTN_preprocessing to decompose contraction into fast jax instructions ! 
+save_data('TTN/prepad', save_path, train_dict_CTN, val_dict_CTN, test_dict_CTN, w2i, r2i)
+# ----------------------------------------- MERA / bTREE saving ------------------------------------ #

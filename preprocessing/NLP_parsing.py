@@ -120,16 +120,15 @@ sents = np.concatenate((pos_sents, neg_sents))
 labels = np.concatenate(([[1,0]]*len(pos_sents),[[0,1]]*len(neg_sents)))
 sents, trees, labels = get_diagrams(sents, labels)
 
+# trees[0].draw()
 parsed_data = dict({"sents": sents, "trees": trees, "labels": labels})
 
 print("Forming w2i, r2i")
 min_freq = 1
 w2i = compute_w2i(sents, min_freq)
 
-print("Saving parsed data.")
 save_path = f'Data/{data}_trees/'
+print("Saving parsed data at: ", save_path)
 Path(save_path).mkdir(parents=True, exist_ok=True)
 pickle.dump(obj=w2i, file=open(f'{save_path}{"w2i"}', 'wb'))
 pickle.dump(obj=parsed_data, file=open(f'{save_path}{"parsed_data"}', 'wb'))
-
-
